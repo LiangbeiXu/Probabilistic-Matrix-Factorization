@@ -17,6 +17,8 @@ class PMF(object):
 
         self.rmse_train = []
         self.rmse_test = []
+        self.classification_train = []
+        self.classification_test = []
 
     # ***Fit the model with train_tuple and evaluate RMSE on both train and test data.  ***********#
     # ***************** train_vec=TrainData, test_vec=TestData*************#
@@ -64,6 +66,20 @@ class PMF(object):
                                   axis=1)  # mean_inv subtracted # np.multiply对应位置元素相乘
 
                 rawErr = pred_out - train_vec[shuffled_order[batch_idx], 2] + self.mean_inv
+                
+                x = np.sum(np.multiply(self.w_User[batch_UserID, :],
+                                              self.w_Item[batch_ItemID, :]),
+                                  axis=1)  # mean_inv subtracted # np.multiply对应位置元素相乘
+                expnx = np.exp(-x)            
+                linkx = np.divide(1, (1+expnx))          
+                logx = np.log(linkx)
+                lognx = np.log(1-linkx)
+                # rawErr = pred_out - train_vec[shuffled_order[batch_idx], 2] + self.mean_inv
+                
+                y = train_vec[shuffled_order[batch_idx], 2]
+                logloss = np.multiply(y,logx) + np.multiply(1-y, lognx)
+                gradlogloss = np.multiply(y,1-linkx) + np.multiply(1-y, linkx)
+
 
                 # Compute gradients
                 Ix_User = 2 * np.multiply(rawErr[:, np.newaxis], self.w_Item[batch_ItemID, :]) \
