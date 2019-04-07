@@ -213,4 +213,4 @@ def PreprocessAssistmentSkillBuilder(file_path):
     data_new['fCount'] = fCntList
     data_new['hist'] = hist_rec_list
 
-    return data_new
+    return data_new, num_skills

@@ -8,6 +8,7 @@ Created on Tue Apr  2 11:12:06 2019
 
 import numpy as np
 import sklearn as sklearn
+import itertools
 
 class PFA(object):
     def __init__(self, epsilon=1, _lambda=0.1, momentum=0.8, maxepoch=20, num_batches=300, batch_size=1000, dynamic=True):
@@ -41,7 +42,7 @@ class PFA(object):
         self.classification_test = []
         
         
-    def fit_single_skill(self, train_vec, test_vec,  num_user, num_skill):
+    def fit_single_skill(self, train_vec, test_vec,  num_user, num_skill, num_problem, multi_skills):
         pairs_train = train_vec.shape[0]  
         pairs_test = test_vec.shape[0]  
         
@@ -49,12 +50,14 @@ class PFA(object):
         self.mean_inv = np.mean(train_vec['correct'])
         self.epoch = 0
         # initialization
-        self.beta = 0.1 * np.random.randn(num_skill)
+        self.beta =  0.1 * np.random.randn(num_skill)
+        self.beta2 = 0.1 * np.random.randn(num_problem)
         self.gamma = 0.1 * np.random.randn(num_skill)
-        self.rho = 0.1 * np.random.randn(num_skill)
+        self.rho   = 0.1 * np.random.randn(num_skill)
         self.alpha = 0.1 * np.random.randn(num_user)
         
         self.beta_inc = np.zeros(num_skill)
+        self.beta2_inc = np.zeros(num_problem)
         self.gamma_inc = np.zeros(num_skill)
         self.rho_inc = np.zeros(num_skill)
         self.alpha_inc = np.zeros(num_user)
@@ -70,14 +73,19 @@ class PFA(object):
                 test = np.arange(self.batch_size * batch, self.batch_size * (batch + 1))
                 batch_idx = np.mod(test, shuffled_order.shape[0])  # index used in this batch
                 batch_UserID = np.array(train_vec.loc[shuffled_order[batch_idx], 'user_id'], dtype='int32')
-                batch_ItemID = np.array(train_vec.loc[shuffled_order[batch_idx], 'skill_id'], dtype='int32')
 
-                # compute obj function 
-                x1 = np.multiply(train_vec.loc[shuffled_order[batch_idx], 'sCount'].values, self.gamma[batch_ItemID])
-                x2 = np.multiply(train_vec.loc[shuffled_order[batch_idx], 'fCount'].values, self.rho[batch_ItemID])
-                x = self.alpha[batch_UserID] + self.beta[batch_ItemID] + x1 + x2
-                expnx = np.exp(-x)            
-                linkx = np.divide(1, (1+expnx))          
+                batch_skillID = np.array(train_vec.loc[shuffled_order[batch_idx], 'skill_id'], dtype='int32')
+                batch_ProbID = np.array(train_vec.loc[shuffled_order[batch_idx], 'problem_id'], dtype='int32')
+
+                # compute obj function
+                sCounts = train_vec.loc[shuffled_order[batch_idx], 'sCount'].values
+                fCounts = train_vec.loc[shuffled_order[batch_idx], 'fCount'].values
+
+                x1 = np.multiply(train_vec.loc[shuffled_order[batch_idx], 'sCount'].values, self.gamma[batch_skillID])
+                x2 = np.multiply(train_vec.loc[shuffled_order[batch_idx], 'fCount'].values, self.rho[batch_skillID])
+                x = self.alpha[batch_UserID] + self.beta[batch_skillID] + x1 + x2 + self.beta2[batch_ProbID]
+                expnx = np.exp(-x)
+                linkx = np.divide(1, (1+expnx))
                 # logx = np.log(linkx)
                 # lognx = np.log(1-linkx)
 
@@ -85,14 +93,16 @@ class PFA(object):
                 gradlogloss = -  np.multiply(y,1-linkx) + np.multiply(1-y, linkx)
 
                 # compute the gradient
-                beta_grad = 2 * gradlogloss + self._lambda * self.beta[batch_ItemID]
+                beta_grad = 2 * gradlogloss + self._lambda * self.beta[batch_skillID]
+                beta2_grad = 2 * gradlogloss + self._lambda * self.beta2[batch_ProbID]
                 gamma_grad = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'sCount'].values) + \
-                    self._lambda * self.gamma[batch_ItemID]
+                    self._lambda * self.gamma[batch_skillID]
                 rho_grad = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'fCount'].values) + \
-                    self._lambda * self.rho[batch_ItemID]
+                    self._lambda * self.rho[batch_skillID]
                 alpha_grad = 2 * gradlogloss + self._lambda * self.alpha[batch_UserID] 
                         
                 dw_beta = np.zeros(num_skill)
+                dw_beta2 = np.zeros(num_problem)
                 dw_gamma = np.zeros(num_skill)
                 dw_rho = np.zeros(num_skill)
                 dw_alpha = np.zeros(num_user)
@@ -100,13 +110,15 @@ class PFA(object):
 
                 # loop to aggreate the gradients of the same element
                 for i in range(self.batch_size):
-                    dw_beta[batch_ItemID[i]] += beta_grad[i]
-                    dw_gamma[batch_ItemID[i]] += gamma_grad[i]
-                    dw_rho[batch_ItemID[i]] += rho_grad[i]
+                    dw_beta[batch_skillID[i]] += beta_grad[i]
+                    dw_beta2[batch_ProbID[i]] += beta2_grad[i]
+                    dw_gamma[batch_skillID[i]] += gamma_grad[i]
+                    dw_rho[batch_skillID[i]] += rho_grad[i]
                     dw_alpha[batch_UserID[i]] += alpha_grad[i]
 
                 # Update with momentum
                 self.beta_inc = self.momentum * self.beta_inc + self.epsilon * dw_beta / self.batch_size   
+                self.beta2_inc = self.momentum * self.beta2_inc + self.epsilon * dw_beta2 / self.batch_size  
                 self.gamma_inc = self.momentum * self.gamma_inc + self.epsilon * dw_gamma / self.batch_size 
                 self.rho_inc = self.momentum * self.rho_inc + self.epsilon * dw_rho / self.batch_size 
                 self.alpha_inc = self.momentum * self.alpha_inc + self.epsilon * dw_alpha / self.batch_size
@@ -114,6 +126,7 @@ class PFA(object):
 
                 # gradien descent 
                 self.beta = self.beta - self.beta_inc
+                self.beta2 = self.beta2 - self.beta2_inc
                 self.gamma = self.gamma - self.gamma_inc
                 self.rho = self.rho - self.rho_inc
                 self.alpha = self.alpha - self.alpha_inc
@@ -125,11 +138,12 @@ class PFA(object):
 
                 # Compute Objective Function after
                 if batch == self.num_batches - 1:
-                    batch_ItemID = np.array(train_vec.loc[:, 'skill_id'], dtype='int32')
+                    batch_skillID = np.array(train_vec.loc[:, 'skill_id'], dtype='int32')
                     batch_UserID = np.array(train_vec.loc[:, 'user_id'], dtype='int32')
-                    x1 = np.multiply(train_vec.loc[:, 'sCount'].values, self.gamma[batch_ItemID])
-                    x2 = np.multiply(train_vec.loc[:, 'fCount'].values, self.rho[batch_ItemID])
-                    x = self.alpha[batch_UserID] + self.beta[batch_ItemID] + x1 + x2
+                    batch_ProbID = np.array(train_vec.loc[:, 'problem_id'], dtype='int32')
+                    x1 = np.multiply(train_vec.loc[:, 'sCount'].values, self.gamma[batch_skillID])
+                    x2 = np.multiply(train_vec.loc[:, 'fCount'].values, self.rho[batch_skillID])
+                    x = self.alpha[batch_UserID] + self.beta[batch_skillID] + self.beta2[batch_ProbID] + x1 + x2
                     expnx = np.exp(-x)            
                     linkx = np.divide(1, (1+expnx))          
                     logx = np.log(linkx)
@@ -146,11 +160,12 @@ class PFA(object):
                 
                 # Compute validation error
                 if batch == self.num_batches - 1:   
-                    batch_ItemID = np.array(test_vec.loc[:, 'skill_id'], dtype='int32')
+                    batch_skillID = np.array(test_vec.loc[:, 'skill_id'], dtype='int32')
                     batch_UserID = np.array(test_vec.loc[:, 'user_id'], dtype='int32')
-                    x1 = np.multiply(test_vec.loc[:, 'sCount'].values, self.gamma[batch_ItemID])
-                    x2 = np.multiply(test_vec.loc[:, 'fCount'].values, self.rho[batch_ItemID])
-                    x = self.alpha[batch_UserID] + self.beta[batch_ItemID] + x1 + x2
+                    batch_ProbID = np.array(test_vec.loc[:, 'problem_id'], dtype='int32')
+                    x1 = np.multiply(test_vec.loc[:, 'sCount'].values, self.gamma[batch_skillID])
+                    x2 = np.multiply(test_vec.loc[:, 'fCount'].values, self.rho[batch_skillID])
+                    x = self.alpha[batch_UserID] + self.beta[batch_skillID] + self.beta2[batch_ProbID] + x1 + x2
                     expnx = np.exp(-x)            
                     linkx = np.divide(1, (1+expnx))          
                     logx = np.log(linkx)
@@ -185,4 +200,3 @@ class PFA(object):
             self.num_batches = parameters.get("num_batches", 10)
             self.batch_size = parameters.get("batch_size", 1000)
             self.dynamic = parameters.get("dynamic", True)
-    
