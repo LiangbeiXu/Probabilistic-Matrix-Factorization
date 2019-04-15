@@ -15,19 +15,45 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 
 # use split problem ids
+def PreprocessAssistment15(file_path):
+    data = pd.read_csv(file_path,dtype={ 'log_id':np.int, \
+        'sequence_id':np.int, 'user_id':np.int, 'correct':np.float})
+    data = data.rename(columns={'log_id': 'order_id', 'sequence_id': 'skill_id'})
+    print('# of records: %d.' %(data.shape[0]))
+    data.dropna(inplace=True)
+    print('After dropping NaN rows, # of records: %d.' %(data.shape[0]))
+    data.sort_values('order_id',ascending=True, inplace=True)
+    data.correct = data.correct.astype(np.int)
+    data.skill_id = data.skill_id.astype(np.int)
+    return ReMapID_skill_user(data)
 
 def PreprocessAssistment(file_path):
     data = pd.read_csv(file_path,dtype={'skill_name':np.str, 'order_id':np.int, \
-        'problem_id':np.int, 'user_id':np.int, 'correct':np.int})
+        'problem_id':np.int, 'user_id':np.int, 'correct':np.int, 'original':np.int})
     data.drop(axis=1,columns='skill_name', inplace=True)
     print('# of records: %d.' %(data.shape[0]))
     data.dropna(inplace=True)
     print('After dropping NaN rows, # of records: %d.' %(data.shape[0]))
     data.sort_values('order_id',ascending=True, inplace=True)
-    return ReMapID(data)
+    data.drop(data[ data.original==0 ].index, axis=0, inplace=True)
+    print('After dropping scafolding problems, # of records: %d.' %(data.shape[0]))
+    data.skill_id = data.skill_id.astype(np.int)
+    return ReMapID_prob_skill_user(data)
+
+
+# make the IDs in dataframe continuous from 0 to number-1, slow method
+def ReMapID(data, fields):
+    for field in fields:
+        xid = np.unique(data[field])
+        xid.sort()
+        xdic = dict(zip(xid, list(range(0, len(xid)))))
+        for i in range(data.shape[0]):
+            data.loc[i, field] = xdic.get(data.loc[i, field])
+    return data
+
 
 # make the IDs in dataframe continuous from 0 to number-1
-def ReMapID(data): 
+def ReMapID_prob_skill_user(data):
     pid = np.unique(data['problem_id'])
     pid.sort()
     uid = np.unique(data['user_id'])
@@ -39,8 +65,27 @@ def ReMapID(data):
     print(data.shape[0],  len(np.unique(uid)), len(np.unique(pid)), len(np.unique(sid)))
     pdic = dict(zip(pid, list(range(0, len(pid)))))
     udic = dict(zip(uid, list(range(0, len(uid)))))
-    sdic = dict(zip(sid, list(range(0, len(sid))))) 
+    sdic = dict(zip(sid, list(range(0, len(sid)))))
     data['problem_id'] = data.problem_id.replace(pdic)
+    data['skill_id'] = data.skill_id.replace(sdic)
+    data['user_id'] = data.user_id.replace(udic)
+    return data
+
+
+# make the IDs in dataframe continuous from 0 to number-1
+def ReMapID_skill_user(data):
+
+    uid = np.unique(data['user_id'])
+    uid.sort()
+    sid = np.unique(data['skill_id'])
+    sid.sort()
+    # change dtype of skill_id
+    data.skill_id = data.skill_id.astype(np.int)
+    print(data.shape[0],  len(np.unique(uid)), len(np.unique(sid)))
+
+    udic = dict(zip(uid, list(range(0, len(uid)))))
+    sdic = dict(zip(sid, list(range(0, len(sid)))))
+
     data['skill_id'] = data.skill_id.replace(sdic)
     data['user_id'] = data.user_id.replace(udic)
     return data
@@ -76,7 +121,8 @@ def PreprocessAssistmentPFASingleSkill(file_path, single_skill_only):
     data = PreprocessAssistment(file_path)
     if single_skill_only:
         data = DeleteMultipleSkillsProblem(data)
-        data = ReMapID(data)
+        data.skill_id = data.skill_id.astype(np.int)
+        data = ReMapID_prob_skill_user(data)
     # num_problems = len(np.unique(data['problem_id']))
     num_users = len(np.unique(data['user_id']))
     num_skills = len(np.unique(data['skill_id']))
@@ -166,7 +212,7 @@ def PreprocessAssistmentSkillBuilder(file_path):
         skill_id_values.append(prob_skill_map[data_new_np[i,2]])
 
 
-    # success. failure counts 
+    # success. failure counts
     sCnt = np.zeros(shape=(num_users, num_skills))
     fCnt = np.zeros(shape=(num_users, num_skills))
     sCntList = []
@@ -175,14 +221,14 @@ def PreprocessAssistmentSkillBuilder(file_path):
     for i in range(data_new_np.shape[0]):
         sCntList.append(list())
         fCntList.append(list())
-        
+
     for index in range(data_new_np.shape[0]):
-        user_id = data_new_np[index][1]    
+        user_id = data_new_np[index][1]
         skill_ids = skill_id_values[index]
         for skill_id in skill_ids:
             sCntList[index].append(deepcopy(sCnt[user_id][skill_id]))
             fCntList[index].append(deepcopy(fCnt[user_id][skill_id]))
-            # update counts 
+            # update counts
             if datanp[index, 3]:
                 sCnt[user_id][skill_id]  += 1
             else:
@@ -203,14 +249,61 @@ def PreprocessAssistmentSkillBuilder(file_path):
             hist_rec[user_id].append((problem_id))
 
     # new columns contain skill information for each problem
-    columnNames = list(data.head(0)) 
-    data_new = pd.DataFrame(data=data_new_np, columns=columnNames) 
+    columnNames = list(data.head(0))
+    data_new = pd.DataFrame(data=data_new_np, columns=columnNames)
 
-    # add columns 
+    # add columns
     data_new['skill_ids'] = skill_id_values
     data_new.drop(axis=1,columns='skill_id', inplace=True)
     data_new['sCount'] = sCntList
     data_new['fCount'] = fCntList
     data_new['hist'] = hist_rec_list
 
-    return data_new, num_skills
+    return data_new, num_skills, prob_skill_map
+
+
+def PreprocessAssistment15SkillBuilder(file_path):
+
+    data = PreprocessAssistment15(file_path)
+
+    # num_problems = len(np.unique(data['problem_id']))
+    num_users = len(np.unique(data['user_id']))
+    num_skills = len(np.unique(data['skill_id']))
+    num_records = data.shape[0]
+
+
+    # success. failure counts
+    sCnt = np.zeros(shape=(num_users, num_skills), dtype=np.int)
+    fCnt = np.zeros(shape=(num_users, num_skills), dtype=np.int)
+    sCntList = np.zeros(shape=(num_records), dtype=np.int)
+    fCntList = np.zeros(shape=(num_records), dtype=np.int)
+    data_np = data.values
+    col_names = list(data.columns.values)
+    col_indexes = range(len(col_names))
+    col_dic = dict(zip(col_names, list(range(0, len(col_names)))))
+    for index in range(data_np.shape[0]):
+        user_id = data_np[index,col_dic.get('user_id')]
+        skill_id = data_np[index,col_dic.get('skill_id')]
+
+        sCntList[index]=(deepcopy(sCnt[user_id][skill_id]))
+        fCntList[index]=(deepcopy(fCnt[user_id][skill_id]))
+        # update counts
+        if data_np[index,col_dic.get('correct')]==1:
+            sCnt[user_id][skill_id]  += 1
+        else:
+            fCnt[user_id][skill_id]  += 1
+
+    # add columns
+    data['sCount'] = sCntList
+    data['fCount'] = fCntList
+    return data
+
+
+
+# TODO
+def RemoveLeastItemUser(data):
+    num_user = len(np.unique(data['user_id']))
+    num_prob = len(np.unique(data['problem_id']))
+    prob_cnt_per_user = np.zeros((num_user))
+    for i in range(data.shape[0]):
+        prob_cnt_per_user[data.loc[i, 'user_id']] += 1

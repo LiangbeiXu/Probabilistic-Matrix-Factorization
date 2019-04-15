@@ -3,7 +3,7 @@ import numpy as np
 import sklearn as sklearn
 import matplotlib.pyplot as plt
 
-class BPMF(object):
+class BPMFSkillEncoded(object):
     def __init__(self, num_feat=10, epsilon=1, _lambda=0.1, momentum=0.8, maxepoch=20, num_batches=10, batch_size=1000, dynamic=True):
         self.num_feat = num_feat  # Number of latent features,
         self.epsilon = epsilon  # learning rate,
@@ -28,16 +28,16 @@ class BPMF(object):
         self.auc_train = []
         self.auc_test = []
         self.baseline_auc_test= []
-        
+
         self.classification_train = []
         self.classification_test = []
-                            
+
     # ***Fit the model with train_tuple and evaluate RMSE on both train and test data.  ***********#
     # ***************** train_vec=TrainData, test_vec=TestData*************#
-    def fit(self, train_vec, test_vec, train_order, test_order, num_user, num_item):
-        # columns: userid, itemid, correct, 
+    def fit(self, train_vec, test_vec, train_order, test_order, num_user, num_item, prob_skill_map):
+        # columns: userid, itemid, correct,
         self.mean_inv = np.mean(train_vec[:, 2])  # 评分平均值
-        
+
         pairs_train = train_vec.shape[0]  # traindata 中条目数
         pairs_test = test_vec.shape[0]  # testdata中条目数
 
@@ -48,28 +48,31 @@ class BPMF(object):
             self.epoch = 0
             self.w_Item = 0.1 * np.random.rand(num_item, self.num_feat)  # Item latent matrix
             self.w_User = 0.1 * np.random.randn(num_user, self.num_feat)  # User latent matrix
-            
+            for i in range(num_item):
+                self.w_Item[i,prob_skill_map[i]] = 1/ len(prob_skill_map[i])
+
+
             #self.alpha_Item = 0.1 * np.random.uniform(0,1,(num_item, 1))
             self.alpha_Item = 0 * np.random.rand(num_item, 1)   # item teaching ability
             self.alpha_User = 0 * np.random.rand(num_user, 1)   # user learning ability
             self.gamma_Item = 0.1 * np.random.rand(num_item, 1)   # item difficulity
             self.gamma_User = 0.1 * np.random.rand(num_user, 1)   # user ability
             self.gamma = 0.1 * np.random.rand(1)
-            
-            self.w_Item_inc = np.zeros((num_item, self.num_feat)) 
-            self.w_User_inc = np.zeros((num_user, self.num_feat))  
+
+            self.w_Item_inc = np.zeros((num_item, self.num_feat))
+            self.w_User_inc = np.zeros((num_user, self.num_feat))
             self.alpha_Item_inc = np.zeros((num_item, 1))
             self.alpha_User_inc = np.zeros((num_user, 1))
             self.gamma_Item_inc = np.zeros((num_item, 1))
             self.gamma_User_inc = np.zeros((num_user, 1))
             self.gamma_inc = np.zeros(1)
-            
-        while self.epoch < self.maxepoch:  
+
+        while self.epoch < self.maxepoch:
             self.epoch += 1
 
             # Shuffle training truples
-            shuffled_order = np.arange(train_vec.shape[0])  
-            np.random.shuffle(shuffled_order)  
+            shuffled_order = np.arange(train_vec.shape[0])
+            np.random.shuffle(shuffled_order)
 
             # Batch update
             for batch in range(self.num_batches):  # 每次迭代要使用的数据量
@@ -80,10 +83,10 @@ class BPMF(object):
 
                 batch_UserID = np.array(train_vec[shuffled_order[batch_idx], 0], dtype='int32')
                 batch_ItemID = np.array(train_vec[shuffled_order[batch_idx], 1], dtype='int32')
-                
+
                 # accumulate the questions
                 sum_item = np.zeros((self.batch_size, self.num_feat))
-                if  self.dynamic: 
+                if  self.dynamic:
                     for i in range(self.batch_size):
                         hist = train_order[shuffled_order[i]]
                         user_id = train_vec[shuffled_order[i], 0]
@@ -99,12 +102,12 @@ class BPMF(object):
                 new_w_User = self.w_User[batch_UserID, :] + sum_item
                 x = np.sum(np.multiply(new_w_User, self.w_Item[batch_ItemID, :]), axis=1) + \
                     self.gamma_Item[batch_ItemID,:].flatten()  + self.gamma_User[batch_UserID,:].flatten() + self.gamma
-                expnx = np.exp(-x)            
-                linkx = np.divide(1, (1+expnx))          
+                expnx = np.exp(-x)
+                linkx = np.divide(1, (1+expnx))
                 logx = np.log(linkx)
                 lognx = np.log(1-linkx)
                 # rawErr = pred_out - train_vec[shuffled_order[batch_idx], 2] + self.mean_inv
-                
+
                 y = train_vec[shuffled_order[batch_idx], 2]
                 # logloss = - np.sum(np.multiply(y,logx) - np.multiply(1-y, lognx) )
                 gradlogloss = -  np.multiply(y,1-linkx) + np.multiply(1-y, linkx)
@@ -112,13 +115,13 @@ class BPMF(object):
                 # Compute gradients
                 Ix_User = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_Item[batch_ItemID, :]) \
                        + self._lambda * self.w_User[batch_UserID, :]
-                       
+
                 Ix_Item = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_User[batch_UserID, :]) \
                        + self._lambda * (self.w_Item[batch_ItemID, :]) + 2 * sum_item   # np.newaxis :increase the dimension
                 Ix_gamma_Item = 2 * np.reshape(gradlogloss,(self.batch_size,1)) + self._lambda * self.gamma_Item[batch_ItemID,:]
                 Ix_gamma_User = 2 * np.reshape(gradlogloss,(self.batch_size,1)) + self._lambda * self.gamma_User[batch_UserID,:]
                 Ix_gamma= 2 * np.sum(gradlogloss) + self._lambda * self.gamma
-                       
+
                 dw_Item = np.zeros((num_item, self.num_feat))
                 dw_User = np.zeros((num_user, self.num_feat))
                 dw_alpha = np.zeros((num_item, 1))
@@ -143,7 +146,7 @@ class BPMF(object):
                         dw_alpha_user[user_id,:] +=  0.2 * gradlogloss[i] * \
                             np.sum(np.matmul(self.w_Item[hist,: ], np.transpose(self.w_Item[[batch_ItemID[i]],:])))+ \
                             self._lambda * self.alpha_User[user_id,:]
-                
+
                 # Update with momentum
                 self.w_Item_inc = self.momentum * self.w_Item_inc + self.epsilon * dw_Item / self.batch_size
                 self.w_User_inc = self.momentum * self.w_User_inc + self.epsilon * dw_User / self.batch_size
@@ -154,7 +157,8 @@ class BPMF(object):
                 self.gamma_inc = self.momentum * self.gamma_inc + self.epsilon * dw_gamma / self.batch_size
 
 
-                self.w_Item = self.w_Item - self.w_Item_inc
+                # self.w_Item = self.w_Item - self.w_Item_inc
+
                 self.w_User = self.w_User - self.w_User_inc
                 self.alpha_Item = self.alpha_Item - self.alpha_Item_inc
                 self.alpha_User = self.alpha_User - self.alpha_User_inc
@@ -163,6 +167,7 @@ class BPMF(object):
                 self.gamma = self.gamma - self.gamma_inc
 
                 # set to zeros
+                # self.w_Item.fill(0)
                 # self.alpha_Item.fill(0)
                 # self.alpha_User.fill(0)
                 # self.gamma_Item.fill(0)
@@ -175,9 +180,9 @@ class BPMF(object):
 
                 # Compute Objective Function after
                 if batch == self.num_batches - 1:
-                    
+
                     sum_item = np.zeros((pairs_train, self.num_feat))
-                    if  self.dynamic: 
+                    if  self.dynamic:
                         for i in range(pairs_train):
                             hist = train_order[i]
                             user_id = train_vec[i, 0]
@@ -191,11 +196,11 @@ class BPMF(object):
                     new_w_User = self.w_User[np.array(train_vec[:, 0], dtype='int32'), :] + sum_item
                     x = np.sum(np.multiply(new_w_User, self.w_Item[np.array(train_vec[:, 1], dtype='int32'), :]), axis=1) + \
                         self.gamma_Item[np.array(train_vec[:, 1], dtype='int32'),:].flatten() + self.gamma_User[np.array(train_vec[:, 0], dtype='int32'),:].flatten() + self.gamma
-                    expnx = np.exp(-x)            
-                    linkx = np.divide(1, (1+expnx))          
+                    expnx = np.exp(-x)
+                    linkx = np.divide(1, (1+expnx))
                     logx = np.log(linkx)
                     lognx = np.log(1-linkx)
-                    
+
                     y = train_vec[:, 2]
                     auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), linkx)
 
@@ -208,7 +213,7 @@ class BPMF(object):
                 # Compute validation error
                 if batch == self.num_batches - 1:
                     sum_item = np.zeros((pairs_test, self.num_feat))
-                    if  self.dynamic: 
+                    if  self.dynamic:
                         for i in range(pairs_test):
                             hist = test_order[i]
                             user_id = test_vec[i,0]
@@ -222,14 +227,14 @@ class BPMF(object):
                     new_w_User = self.w_User[np.array(test_vec[:, 0], dtype='int32'), :] + sum_item
                     x = np.sum(np.multiply(new_w_User, self.w_Item[np.array(test_vec[:, 1], dtype='int32'), :]), axis=1) + \
                         self.gamma_Item[np.array(test_vec[:, 1], dtype='int32'),:].flatten()  + self.gamma_User[np.array(test_vec[:, 0], dtype='int32'),:].flatten() + self.gamma
-                    expnx = np.exp(-x)            
-                    linkx = np.divide(1, (1+expnx))          
+                    expnx = np.exp(-x)
+                    linkx = np.divide(1, (1+expnx))
                     logx = np.log(linkx)
                     lognx = np.log(1-linkx)
-                    y = test_vec[:, 2] 
+                    y = test_vec[:, 2]
                     y2 = self.mean_inv * np.ones(y.shape)
                     logloss = np.sum(- np.multiply(y,logx) - np.multiply(1-y, lognx) )
-                    
+
                     auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), linkx)
                     baseline_auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), y2)
                     self.auc_test.append(auc)
@@ -245,8 +250,8 @@ class BPMF(object):
 
     def predict(self, invID):
         x  = np.dot(self.w_Item, self.w_User[int(invID), :])
-        expnx = np.exp(0-x)            
-        pred = np.divide(1, (1+expnx))     
+        expnx = np.exp(0-x)
+        pred = np.divide(1, (1+expnx))
         # return np.dot(self.w_Item, self.w_User[int(invID), :]) + self.mean_inv  # numpy.dot 点乘
         return pred
 
