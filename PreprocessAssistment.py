@@ -13,12 +13,13 @@ from sklearn.model_selection import train_test_split
 from PerformanceFactorAnalysis import PFA
 from copy import deepcopy
 import matplotlib.pyplot as plt
+import random
 
 # use split problem ids
 def PreprocessAssistment15(file_path):
     data = pd.read_csv(file_path,dtype={ 'log_id':np.int, \
         'sequence_id':np.int, 'user_id':np.int, 'correct':np.float})
-    data = data.rename(columns={'log_id': 'order_id', 'sequence_id': 'skill_id'})
+    # data = data.rename(columns={'log_id': 'order_id', 'sequence_id': 'skill_id'})
     print('# of records: %d.' %(data.shape[0]))
     data.dropna(inplace=True)
     print('After dropping NaN rows, # of records: %d.' %(data.shape[0]))
@@ -292,15 +293,76 @@ def PreprocessAssistment15SkillBuilder(file_path):
             sCnt[user_id][skill_id]  += 1
         else:
             fCnt[user_id][skill_id]  += 1
-
     # add columns
     data['sCount'] = sCntList
     data['fCount'] = fCntList
+    if True:
+        hist_rec = []
+        hist_rec_list = []
+        for i in range(num_users):
+            hist_rec.append([])
+
+        for index in range(data_np.shape[0]):
+            user_id = data_np[index,col_dic.get('user_id')]
+            skill_id = data_np[index,col_dic.get('skill_id')]
+            hist_rec_list.append([])
+            hist_rec_list[index] = hist_rec[user_id].copy()
+            if(data_np[index, 3]==1):
+                if len( hist_rec[user_id]) < 10:
+                    hist_rec[user_id].append(skill_id)
+                else:
+                    hist_rec[user_id][0:-1] = hist_rec[user_id][1:len(hist_rec[user_id])]
+                    hist_rec[user_id][len(hist_rec[user_id])-1] = skill_id
+        data['hist'] = hist_rec_list
+
+
     return data
 
+def SplitSeq(data, validation_rate, testing_rate, shuffle=True):
+    def split(dt):
+        return [[value[0] for value in seq] for seq in dt], [[value[1] for value in seq] for seq in dt]
+
+    seqs = data
+    if shuffle:
+        random.shuffle(seqs)
+
+    # Get testing data
+    test_idx = random.sample(range(0, len(seqs)-1), int(len(seqs) * testing_rate))
+    X_test, y_test = split([value for idx, value in enumerate(seqs) if idx in test_idx])
+    seqs = [value for idx, value in enumerate(seqs) if idx not in test_idx]
+
+    # Get validation data
+    val_idx = random.sample(range(0, len(seqs) - 1), int(len(seqs) * validation_rate))
+    X_val, y_val = split([value for idx, value in enumerate(seqs) if idx in val_idx])
+
+    # Get training data
+    X_train, y_train = split([value for idx, value in enumerate(seqs) if idx not in val_idx])
+
+    return X_train, X_val, X_test, y_train, y_val, y_test
 
 
+def Data2Seq(data):
+    # Step 2 - Convert to sequence by student id
+    students_seq = data.groupby("user_id", as_index=True)["skill_id", "correct"].apply(lambda x: x.values.tolist()).tolist()
+
+    # Step 3 - Rearrange the skill_id
+    seqs_by_student = {}
+    skill_ids = {}
+    num_skill = 0
+
+    for seq_idx, seq in enumerate(students_seq):
+        for (skill, answer) in seq:
+            if seq_idx not in seqs_by_student:
+                seqs_by_student[seq_idx] = []
+            if skill not in skill_ids:
+                skill_ids[skill] = num_skill
+                num_skill += 1
+
+            seqs_by_student[seq_idx].append((skill_ids[skill], answer))
+
+    return list(seqs_by_student.values()), num_skill
 # TODO
+
 def RemoveLeastItemUser(data):
     num_user = len(np.unique(data['user_id']))
     num_prob = len(np.unique(data['problem_id']))

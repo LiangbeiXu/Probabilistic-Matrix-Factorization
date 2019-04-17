@@ -12,7 +12,8 @@ import itertools
 
 class IRT(object):
     def __init__(self, epsilon=1, _lambda=0.1, momentum=0.8, maxepoch=20, num_batches=300, batch_size=1000, \
-                 problem=False, multi_skills=False, user_skill=False, user_prob=False, PFA=False, MF=False, num_feat=5, MF_skill=True):
+                 problem=False, multi_skills=False, user_skill=False, user_prob=False, PFA=False, MF=False, \
+                 num_feat=5, MF_skill=False, user=True, skill_dyn_embeddding=False):
 
         self.epsilon = epsilon  # learning rate,
         self._lambda = _lambda  # L2 regularization,
@@ -28,6 +29,8 @@ class IRT(object):
         self.num_feat = num_feat
         self.problem = problem
         self.MF_skill = MF_skill
+        self.user = user
+        self.skill_dyn_embeddding = skill_dyn_embeddding
 
 
         self.beta_skill = None
@@ -91,6 +94,9 @@ class IRT(object):
         self.w_prob = 0.1 * np.random.rand(num_prob, self.num_feat)  # problem latent matrix
         self.w_user = 0.1 * np.random.randn(num_user, self.num_feat)  # user latent matrix
         self.w_skill = 0.1 * np.random.randn(num_skill, self.num_feat)  # user latent matrix
+
+        self.h_user = 0.1 * np.random.rand(num_user, self.num_feat)
+        self.h_skill = 0.1 * np.random.rand(num_skill, self.num_feat)
         
         self.beta_skill_inc = np.zeros(num_skill)
         self.beta_prob_inc = np.zeros(num_prob)
@@ -107,6 +113,10 @@ class IRT(object):
         self.w_prob_inc = np.zeros((num_prob, self.num_feat))
         self.w_user_inc = np.zeros((num_user, self.num_feat))
         self.w_skill_inc = np.zeros((num_skill, self.num_feat))
+
+        self.h_user_inc = np.zeros((num_user, self.num_feat))
+        self.h_skill_inc = np.zeros((num_skill, self.num_feat))
+
 
         while self.epoch < self.maxepoch:
             self.epoch += 1
@@ -130,7 +140,7 @@ class IRT(object):
                 dw_beta_skill = np.zeros(num_skill)
                 dw_beta_prob = np.zeros(num_prob)
                 dw_beta_user = np.zeros(num_user)
-                dw_beta_global = 2 * np.sum(gradlogloss) + self._lambda * self.beta_global
+                dw_beta_global = np.zeros(1)
 
                 dw_gamma = np.zeros(num_skill)
                 dw_rho = np.zeros(num_skill)
@@ -139,15 +149,123 @@ class IRT(object):
                 dw_alpha_prob = np.zeros(num_prob)
                 dw_alpha_user = np.zeros(num_user)
 
+                dw_h_user = np.zeros((num_user, self.num_feat))
+                dw_h_skill = np.zeros((num_skill, self.num_feat))
+
+                batch_userID = np.array(train_vec.loc[shuffled_order[batch_idx], 'user_id'], dtype='int32')
                 if self.PFA:
                     s_counts = train_vec.loc[shuffled_order[batch_idx], 'sCount'].values
                     f_counts = train_vec.loc[shuffled_order[batch_idx], 'fCount'].values
-                batch_userID = np.array(train_vec.loc[shuffled_order[batch_idx], 'user_id'], dtype='int32')
-
                 if self.multi_skills:
                     batch_skillIDs = train_vec.loc[shuffled_order[batch_idx], 'skill_ids'].values
                 else:
                     batch_skillID = train_vec.loc[shuffled_order[batch_idx], 'skill_id'].values
+                if False:
+                    if self.multi_skills:
+                        for i in range(self.batch_size):
+                            for idx, skill in enumerate(batch_skillIDs[i]):
+                                dw_beta_skill[skill]  += 2 * gradlogloss[i] / len(batch_skillIDs[i]) + self._lambda * self.beta_skill[skill]
+                                if self.PFA:
+                                    dw_gamma[skill] += 0.2 * gradlogloss[i] * s_counts[i][idx] + self._lambda * self.gamma[skill]
+                                    dw_rho[skill]   += 0.2 * gradlogloss[i] * f_counts[i][idx] + self._lambda * self.rho[skill]
+                                if self.user_skill:
+                                    dw_alpha_skill[skill]  += 2 * gradlogloss[i] * self.alpha_user[batch_userID[i]] / len(batch_skillIDs[i]) + self._lambda * self.alpha_skill[skill]
+                                    dw_alpha_user[batch_userID[i]] +=  2 * gradlogloss[i] * self.alpha_skill[skill] / len(batch_skillIDs[i]) + self._lambda * self.alpha_user[batch_userID[i]]
+
+
+                    else:
+                        beta_skill_grad  = 2 * gradlogloss + self._lambda * self.beta_skill[batch_skillID]
+
+                        if self.PFA:
+                            gamma_grad = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'sCount'].values) + \
+                                self._lambda * self.gamma[batch_skillID]
+                            rho_grad   = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'fCount'].values) + \
+                                self._lambda * self.rho[batch_skillID]
+                        if self.user_skill:
+                            alpha_user_grad = 2 * gradlogloss * self.alpha_skill[batch_skillID] + self._lambda * self.alpha_user[batch_userID]
+                            alpha_skill_grad = 2 * gradlogloss * self.alpha_user[batch_userID] + self._lambda * self.alpha_skill[batch_skillID]
+
+                        # loop to aggreate the gradients of the same element
+                        for i in range(self.batch_size):
+                            dw_beta_skill[batch_skillID[i]]  += beta_skill_grad[i]
+                            if self.user_skill:
+                                dw_alpha_skill[batch_skillID[i]]  += alpha_skill_grad[i]
+                                dw_alpha_user[batch_userID[i]]  += alpha_user_grad[i]
+
+                            if self.PFA:
+                                dw_gamma[batch_skillID[i]] += gamma_grad[i]
+                                dw_rho[batch_skillID[i]]   += rho_grad[i]
+
+                # gradient of global, user, skill, prob means
+                dw_beta_global = dw_beta_global + 2 * np.sum(gradlogloss) + self._lambda * self.beta_global
+
+                if self.multi_skills:
+                    for i in range(self.batch_size):
+                        for idx, skill in enumerate(batch_skillIDs[i]):
+                            dw_beta_skill[skill]  += 2 * gradlogloss[i] / len(batch_skillIDs[i]) + self._lambda * self.beta_skill[skill]
+                else:
+                    beta_skill_grad  = 2 * gradlogloss + self._lambda * self.beta_skill[batch_skillID]
+                    for i in range(self.batch_size):
+                        dw_beta_skill[batch_skillID[i]]  += beta_skill_grad[i]
+                if self.user:
+                    beta_user_grad = 2 * gradlogloss + self._lambda * self.beta_user[batch_userID]
+                    for i in range(self.batch_size):
+                        dw_beta_user[batch_userID[i]]  += beta_user_grad[i]
+
+                if self.problem:
+                    batch_probID = np.array(train_vec.loc[shuffled_order[batch_idx], 'problem_id'], dtype='int32')
+                    beta_prob_grad = 2 * gradlogloss + self._lambda * self.beta_prob[batch_probID]
+                    for i in range(self.batch_size):
+                        dw_beta_prob[batch_probID[i]]  += beta_prob_grad[i]
+
+                if self.user_prob:
+                    for i in range(self.batch_size):
+                        dw_alpha_prob[batch_probID[i]]  += 2 * gradlogloss[i] * self.alpha_user[batch_userID[i]] + self._lambda * self.alpha_prob[batch_probID[i]]
+                        dw_alpha_user[batch_userID[i]] +=  2 * gradlogloss[i] * self.alpha_prob[batch_probID[i]] + self._lambda * self.alpha_user(batch_userID[i])
+
+
+                if self.user_skill:
+                    if self.multi_skills:
+                        for i in range(self.batch_size):
+                            for idx, skill in enumerate(batch_skillIDs[i]):
+                                dw_alpha_skill[skill]  += 2 * gradlogloss[i] * self.alpha_user[batch_userID[i]] / len(batch_skillIDs[i]) + self._lambda * self.alpha_skill[skill]
+                                dw_alpha_user[batch_userID[i]] +=  2 * gradlogloss[i] * self.alpha_skill[skill] / len(batch_skillIDs[i]) + self._lambda * self.alpha_user[batch_userID[i]]
+                    else:
+                        alpha_user_grad = 2 * gradlogloss * self.alpha_skill[batch_skillID] + self._lambda * self.alpha_user[batch_userID]
+                        alpha_skill_grad = 2 * gradlogloss * self.alpha_user[batch_userID] + self._lambda * self.alpha_skill[batch_skillID]
+                        for i in range(self.batch_size):
+                            dw_alpha_skill[batch_skillID[i]]  += alpha_skill_grad[i]
+                            dw_alpha_user[batch_userID[i]]  += alpha_user_grad[i]
+
+                if self.PFA:
+                    s_counts = train_vec.loc[shuffled_order[batch_idx], 'sCount'].values
+                    f_counts = train_vec.loc[shuffled_order[batch_idx], 'fCount'].values
+                    if self.multi_skills:
+                        for i in range(self.batch_size):
+                            for idx, skill in enumerate(batch_skillIDs[i]):
+                                dw_gamma[skill] += 0.2 * gradlogloss[i] * s_counts[i][idx] + self._lambda * self.gamma[skill]
+                                dw_rho[skill]   += 0.2 * gradlogloss[i] * f_counts[i][idx] + self._lambda * self.rho[skill]
+                    else:
+                        gamma_grad = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'sCount'].values) + \
+                            self._lambda * self.gamma[batch_skillID]
+                        rho_grad   = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'fCount'].values) + \
+                            self._lambda * self.rho[batch_skillID]
+                        for i in range(self.batch_size):
+                            dw_gamma[batch_skillID[i]] += gamma_grad[i]
+                            dw_rho[batch_skillID[i]]   += rho_grad[i]
+
+                if self.MF:
+                    Ix_user = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_prob[batch_probID, :]) \
+                       + self._lambda * self.w_user[batch_userID, :]
+
+                    Ix_prob = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_user[batch_userID, :]) \
+                       + self._lambda * (self.w_prob[batch_probID, :])    # np.newaxis :increase the dimension
+                    dw_prob = np.zeros((num_prob, self.num_feat))
+                    if not self.MF_skill:
+                        dw_user = np.zeros((num_user, self.num_feat))
+                    for i in range(self.batch_size):
+                        dw_prob[batch_probID[i], :] = dw_prob[batch_probID[i], :] + Ix_prob[i, :]
+                        dw_user[batch_userID[i], :] = dw_user[batch_userID[i], :] + Ix_user[i, :]
 
                 if self.MF_skill:
                     dw_skill = np.zeros((num_skill, self.num_feat))
@@ -168,119 +286,80 @@ class IRT(object):
                             dw_skill[batch_skillID[i], :] = dw_skill[batch_skillID[i], :] + Ix_skill[i, :]
                             dw_user[batch_userID[i], :] = dw_user[batch_userID[i], :] + Ix_user[i, :]
 
-                if self.multi_skills:
-                    for i in range(self.batch_size):
-                        for idx, skill in enumerate(batch_skillIDs[i]):
-                            dw_beta_skill[skill]  += 2 * gradlogloss[i] / len(batch_skillIDs[i]) + self._lambda * self.beta_skill[skill]
-                            if self.PFA:
-                                dw_gamma[skill] += 0.2 * gradlogloss[i] * s_counts[i][idx] + self._lambda * self.gamma[skill]
-                                dw_rho[skill]   += 0.2 * gradlogloss[i] * f_counts[i][idx] + self._lambda * self.rho[skill]
-                            if self.user_skill:
-                                dw_alpha_skill[skill]  += 2 * gradlogloss[i] * self.alpha_user[batch_userID[i]] / len(batch_skillIDs[i]) + self._lambda * self.alpha_skill[skill]
-                                dw_alpha_user[batch_userID[i]] +=  2 * gradlogloss[i] * self.alpha_skill[skill] / len(batch_skillIDs[i]) + self._lambda * self.alpha_user[batch_userID[i]]
+                if self.skill_dyn_embeddding:
+                    if self.multi_skills:
+                        print('Warning: skill_dyn_embeddding does not support multi-skills')
+                    else:
 
-
-                else:
-                    beta_skill_grad  = 2 * gradlogloss + self._lambda * self.beta_skill[batch_skillID]
-
-                    if self.PFA:
-                        gamma_grad = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'sCount'].values) + \
-                            self._lambda * self.gamma[batch_skillID]
-                        rho_grad   = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'fCount'].values) + \
-                            self._lambda * self.rho[batch_skillID]
-                    if self.user_skill:
-                        alpha_user_grad = 2 * gradlogloss * self.alpha_skill[batch_skillID] + self._lambda * self.alpha_user[batch_userID]
-                        alpha_skill_grad = 2 * gradlogloss * self.alpha_user[batch_userID] + self._lambda * self.alpha_skill[batch_skillID]
-
-                    # loop to aggreate the gradients of the same element
-                    for i in range(self.batch_size):
-                        dw_beta_skill[batch_skillID[i]]  += beta_skill_grad[i]
-                        if self.user_skill:
-                            dw_alpha_skill[batch_skillID[i]]  += alpha_skill_grad[i]
-                            dw_alpha_user[batch_userID[i]]  += alpha_user_grad[i]
-
-                        if self.PFA:
-                            dw_gamma[batch_skillID[i]] += gamma_grad[i]
-                            dw_rho[batch_skillID[i]]   += rho_grad[i]
-
-
-                beta_user_grad = 2 * gradlogloss + self._lambda * self.beta_user[batch_userID]
-                for i in range(self.batch_size):
-                    dw_beta_user[batch_userID[i]]  += beta_user_grad[i]
-
-                if self.problem:
-                    batch_probID = np.array(train_vec.loc[shuffled_order[batch_idx], 'problem_id'], dtype='int32')
-                    beta_prob_grad = 2 * gradlogloss + self._lambda * self.beta_prob[batch_probID]
-                    for i in range(self.batch_size):
-                        dw_beta_prob[batch_probID[i]]  += beta_prob_grad[i]
-                if self.MF:
-                    Ix_user = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_prob[batch_probID, :]) \
-                       + self._lambda * self.w_user[batch_userID, :]
-
-                    Ix_prob = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_user[batch_userID, :]) \
-                       + self._lambda * (self.w_prob[batch_probID, :])    # np.newaxis :increase the dimension
-                    dw_prob = np.zeros((num_prob, self.num_feat))
-                    if not self.MF_skill:
-                        dw_user = np.zeros((num_user, self.num_feat))
-                    for i in range(self.batch_size):
-                        dw_prob[batch_probID[i], :] = dw_prob[batch_probID[i], :] + Ix_prob[i, :]
-                        dw_user[batch_userID[i], :] = dw_user[batch_userID[i], :] + Ix_user[i, :]
-
-
-                if self.user_prob:
-                    for i in range(self.batch_size):
-                        dw_alpha_prob[batch_probID[i]]  += 2 * gradlogloss[i] * self.alpha_user[batch_userID[i]] + self._lambda * self.alpha_prob[batch_probID[i]]
-                        dw_alpha_user[batch_userID[i]] +=  2 * gradlogloss[i] * self.alpha_prob[batch_probID[i]] + self._lambda * self.alpha_user(batch_userID[i])
+                        # hists = data.loc[:, 'hist'].values
+                        hists = train_vec.loc[shuffled_order[batch_idx], 'hist'].values
+                        sum_item = np.zeros((self.batch_size, self.num_feat))
+                        for idx in range(len(hists)):
+                            hist = hists[idx]
+                            if len(hist) == 0:
+                                continue
+                            elif len(hist) > 10:
+                                hist = hist[0:9]
+                            sum_item[idx, :] =  np.sum(self.h_skill[hist,:], axis=0)
+                            for skill in hist:
+                                dw_h_skill[skill, :] += 2 * np.multiply(gradlogloss[i, np.newaxis], self.h_user[batch_userID[i], :]) \
+                                    + self._lambda * (self.h_skill[skill, :])
+                        Ix_user = 2 * np.multiply(gradlogloss[:, np.newaxis], sum_item) \
+                           + self._lambda * self.w_user[batch_userID, :]
+                        for i in range(self.batch_size):
+                            dw_h_user[batch_userID[i], :] = dw_h_user[batch_userID[i], :] + Ix_user[i, :]
 
                 # Update with momentum
                 self.beta_skill_inc  = self.momentum * self.beta_skill_inc  + self.epsilon * dw_beta_skill  / self.batch_size
-
                 self.beta_user_inc = self.momentum * self.beta_user_inc + self.epsilon * dw_beta_user / self.batch_size
                 self.beta_global_inc = self.momentum * self.beta_global_inc + self.epsilon * dw_beta_global / self.batch_size
+                if self.problem:
+                    self.beta_prob_inc = self.momentum * self.beta_prob_inc + self.epsilon * dw_beta_prob / self.batch_size
                 if self.PFA:
                     self.gamma_inc = self.momentum * self.gamma_inc + self.epsilon * dw_gamma / self.batch_size
                     self.rho_inc   = self.momentum * self.rho_inc   + self.epsilon * dw_rho   / self.batch_size
-
-                if self.MF or self.MF_skill:
-                    self.w_user_inc = self.momentum * self.w_user_inc + self.epsilon * dw_user / self.batch_size
-                    if self.MF:
-                        self.w_prob_inc = self.momentum * self.w_prob_inc + self.epsilon * dw_prob / self.batch_size
-                    if self.MF_skill:
-                        self.w_skill_inc = self.momentum * self.w_skill_inc + self.epsilon * dw_skill / self.batch_size
-
                 if self.user_prob or self.user_skill:
                     self.alpha_user_inc = self.momentum * self.alpha_user_inc + self.epsilon * dw_alpha_user / self.batch_size
                     if self.user_prob:
                         self.alpha_prob_inc = self.momentum * self.alpha_prob_inc + self.epsilon * dw_alpha_prob / self.batch_size
                     if self.user_skill:
                         self.alpha_skill_inc = self.momentum * self.alpha_skill_inc + self.epsilon * dw_alpha_skill / self.batch_size
-
-                if self.problem:
-                    self.beta_prob_inc = self.momentum * self.beta_prob_inc + self.epsilon * dw_beta_prob / self.batch_size
+                if self.MF or self.MF_skill:
+                    self.w_user_inc = self.momentum * self.w_user_inc + self.epsilon * dw_user / self.batch_size
+                    if self.MF:
+                        self.w_prob_inc = self.momentum * self.w_prob_inc + self.epsilon * dw_prob / self.batch_size
+                    if self.MF_skill:
+                        self.w_skill_inc = self.momentum * self.w_skill_inc + self.epsilon * dw_skill / self.batch_size
+                if self.skill_dyn_embeddding:
+                    self.h_user_inc = self.momentum * self.h_user_inc + self.epsilon * dw_h_user / self.batch_size
+                    self.h_skill_inc = self.momentum * self.h_skill_inc + self.epsilon * dw_h_skill / self.batch_size
 
                 # gradien descent
-                self.beta_skill  = self.beta_skill  - self.beta_skill_inc
-
-                self.beta_user = self.beta_user - self.beta_user_inc
                 self.beta_global = self.beta_global - self.beta_global_inc
-                if self.PFA:
-                    self.gamma = self.gamma - self.gamma_inc
-                    self.rho   = self.rho   - self.rho_inc
-                if self.MF:
-                    self.w_user = self.w_user - self.w_user_inc
-                    if self.MF:
-                        self.w_prob = self.w_prob - self.w_prob_inc
-                    if self.MF_skill:
-                        self.w_skill = self.w_skill - self.w_skill_inc
-
+                self.beta_skill  = self.beta_skill  - self.beta_skill_inc
+                self.beta_user = self.beta_user - self.beta_user_inc
+                if self.problem:
+                    self.beta_prob = self.beta_prob - self.beta_prob_inc
                 if self.user_skill or  self.user_prob:
                     self.alpha_user = self.alpha_user - self.alpha_user_inc
                     if self.user_skill:
                         self.alpha_skill = self.alpha_skill - self.alpha_skill_inc
                     if self.user_prob:
                         self.alpha_prob = self.alpha_prob - self.alpha_prob_inc
-                if self.problem:
-                    self.beta_prob = self.beta_prob - self.beta_prob_inc
+                if self.PFA:
+                    self.gamma = self.gamma - self.gamma_inc
+                    self.rho   = self.rho   - self.rho_inc
+                if self.MF or self.MF_skill:
+                    self.w_user = self.w_user - self.w_user_inc
+                    if self.MF:
+                        self.w_prob = self.w_prob - self.w_prob_inc
+                    if self.MF_skill:
+                        self.w_skill = self.w_skill - self.w_skill_inc
+                if self.skill_dyn_embeddding:
+                    self.h_user = self.h_user - self.h_user_inc
+                    self.h_skill = self.h_skill - self.h_skill_inc
+
+
                 # select models
                 # self.beta_skill.fill(0)
                 # self.beta_prob.fill(0)
@@ -322,8 +401,9 @@ class IRT(object):
                               % (self.logloss_train[-1], self.logloss_test[-1], self.auc_train[-1], self.auc_test[-1]) )
 
     def CalcPrediction(self, data):
-        batch_userID = np.array(data.loc[:, 'user_id'], dtype='int32')
-
+        if self.user or self.user_prob or self.user_skill:
+            batch_userID = np.array(data.loc[:, 'user_id'], dtype='int32')
+        x = np.zeros(data.shape[0])
         if self.PFA:
             s_counts = data.loc[:, 'sCount'].values
             f_counts = data.loc[:, 'fCount'].values
@@ -340,7 +420,7 @@ class IRT(object):
                     x2[i] = np.sum(np.multiply(self.rho[batch_skillIDs[i]], f_counts[i]))
                 x3[i] = np.sum(self.beta_skill[batch_skillIDs[i]]) / len(batch_skillIDs[i])
                 x4[i] = np.sum(self.alpha_skill[batch_skillIDs[i]]) / len(batch_skillIDs[i])
-            x = self.beta_user[batch_userID] + x3  + self.beta_global
+            x = x + x3  + self.beta_global
             if self.user_skill:
                 x = x + np.multiply(x4, self.alpha_user[batch_userID] )
         else:
@@ -348,9 +428,11 @@ class IRT(object):
             if self.PFA:
                 x1 = np.multiply(data.loc[:, 'sCount'].values, self.gamma[batch_skillID])
                 x2 = np.multiply(data.loc[:, 'fCount'].values, self.rho[batch_skillID])
-            x = self.beta_user[batch_userID] + self.beta_skill[batch_skillID]  + self.beta_global
+            x = x + self.beta_skill[batch_skillID]  + self.beta_global
             if self.user_skill:
                 x = x + np.multiply(self.alpha_skill[batch_skillID], self.alpha_user[batch_userID])
+        if self.user:
+            x = x + self.beta_user[batch_userID]
         if self.problem:
             batch_probID = np.array(data.loc[:, 'problem_id'], dtype='int32')
             x = x + self.beta_prob[batch_probID]
@@ -370,7 +452,21 @@ class IRT(object):
                 x = x + np.sum(np.multiply(w_skill, self.w_user[batch_userID, :]), axis=1)
             else:
                 x = x + np.sum(np.multiply(self.w_skill[batch_skillID, :], self.w_user[batch_userID, :]), axis=1)
+
+        if self.skill_dyn_embeddding:
+            if self.multi_skills:
+                print('Warning: skill_dyn_embedding does not support multi-skills')
+            else:
+                hists = data.loc[:,'hist'].values
+                sum_item = np.zeros((data.shape[0], self.num_feat))
+                for idx  in range(len(hists)):
+                    hist = hists[idx]
+                    if not hist:
+                        continue
+                    sum_item[idx,:] = np.sum(self.h_skill_inc[hist,:], axis=0)
+                x = x + np.sum(np.multiply(sum_item, self.h_user[batch_userID,:]), axis=1)
         return x
+
 
     # ****************Set parameters by providing a parameter dictionary.  ***********#
     def set_params(self, parameters):
@@ -389,6 +485,8 @@ class IRT(object):
             self.num_feat = parameters.get('num_feat', 5)
             self.problem = parameters.get('problem', False)
             self.MF_skill = parameters.get('MF_skill', False)
+            self.user = parameters.get('user', True)
+            self.skill_dyn_embeddding = parameters.get('skill_dyn_embeddding', False)
         if self.MF:
             self.problem = True
         if self.user_prob:
