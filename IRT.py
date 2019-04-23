@@ -21,6 +21,7 @@ class IRT(object):
         self.maxepoch = maxepoch  # Number of epoch before stop,
         self.num_batches = num_batches  # Number of batches in each epoch (for SGD optimization),
         self.batch_size = batch_size  # Number of training samples used in each batches (for SGD optimization)
+
         self.multi_skills = multi_skills
         self.user_skill = user_skill
         self.user_prob = user_prob
@@ -49,6 +50,9 @@ class IRT(object):
         self.alpha_prob = None
         self.alpha_skill = None
 
+        self.h_user = None
+        self.h_skill = None
+
         self.beta_skill_inc = None
         self.beta_prob_inc = None
         self.beta_user_inc = None
@@ -60,6 +64,9 @@ class IRT(object):
         self.w_prob_inc = None  # problem feature vectors
         self.w_user_inc = None  # user feature vectors
         self.w_skill_inc = None  # skill feature vectors
+
+        self.h_skill_inc = None
+        self.h_user_inc  = None
 
         self.logloss_train = []
         self.logloss_test = []
@@ -160,41 +167,6 @@ class IRT(object):
                     batch_skillIDs = train_vec.loc[shuffled_order[batch_idx], 'skill_ids'].values
                 else:
                     batch_skillID = train_vec.loc[shuffled_order[batch_idx], 'skill_id'].values
-                if False:
-                    if self.multi_skills:
-                        for i in range(self.batch_size):
-                            for idx, skill in enumerate(batch_skillIDs[i]):
-                                dw_beta_skill[skill]  += 2 * gradlogloss[i] / len(batch_skillIDs[i]) + self._lambda * self.beta_skill[skill]
-                                if self.PFA:
-                                    dw_gamma[skill] += 0.2 * gradlogloss[i] * s_counts[i][idx] + self._lambda * self.gamma[skill]
-                                    dw_rho[skill]   += 0.2 * gradlogloss[i] * f_counts[i][idx] + self._lambda * self.rho[skill]
-                                if self.user_skill:
-                                    dw_alpha_skill[skill]  += 2 * gradlogloss[i] * self.alpha_user[batch_userID[i]] / len(batch_skillIDs[i]) + self._lambda * self.alpha_skill[skill]
-                                    dw_alpha_user[batch_userID[i]] +=  2 * gradlogloss[i] * self.alpha_skill[skill] / len(batch_skillIDs[i]) + self._lambda * self.alpha_user[batch_userID[i]]
-
-
-                    else:
-                        beta_skill_grad  = 2 * gradlogloss + self._lambda * self.beta_skill[batch_skillID]
-
-                        if self.PFA:
-                            gamma_grad = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'sCount'].values) + \
-                                self._lambda * self.gamma[batch_skillID]
-                            rho_grad   = 0.2 * np.multiply(gradlogloss, train_vec.loc[shuffled_order[batch_idx], 'fCount'].values) + \
-                                self._lambda * self.rho[batch_skillID]
-                        if self.user_skill:
-                            alpha_user_grad = 2 * gradlogloss * self.alpha_skill[batch_skillID] + self._lambda * self.alpha_user[batch_userID]
-                            alpha_skill_grad = 2 * gradlogloss * self.alpha_user[batch_userID] + self._lambda * self.alpha_skill[batch_skillID]
-
-                        # loop to aggreate the gradients of the same element
-                        for i in range(self.batch_size):
-                            dw_beta_skill[batch_skillID[i]]  += beta_skill_grad[i]
-                            if self.user_skill:
-                                dw_alpha_skill[batch_skillID[i]]  += alpha_skill_grad[i]
-                                dw_alpha_user[batch_userID[i]]  += alpha_user_grad[i]
-
-                            if self.PFA:
-                                dw_gamma[batch_skillID[i]] += gamma_grad[i]
-                                dw_rho[batch_skillID[i]]   += rho_grad[i]
 
                 # gradient of global, user, skill, prob means
                 dw_beta_global = dw_beta_global + 2 * np.sum(gradlogloss) + self._lambda * self.beta_global

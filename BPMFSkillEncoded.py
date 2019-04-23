@@ -157,7 +157,7 @@ class BPMFSkillEncoded(object):
                 self.gamma_inc = self.momentum * self.gamma_inc + self.epsilon * dw_gamma / self.batch_size
 
 
-                # self.w_Item = self.w_Item - self.w_Item_inc
+                self.w_Item = self.w_Item - self.w_Item_inc
 
                 self.w_User = self.w_User - self.w_User_inc
                 self.alpha_Item = self.alpha_Item - self.alpha_Item_inc
@@ -242,8 +242,8 @@ class BPMFSkillEncoded(object):
                     self.logloss_test.append((logloss) / (pairs_test))
 
                     # Print info
-                    # plt.hist(self.alpha_Item)
-                    # plt.show()
+                    plt.hist(self.alpha_Item)
+                    plt.show()
                     if batch == self.num_batches - 1:
                         print('Training logloss: %f, Test logloss %f, Train AUC %f, Test AUC %f' \
                               % (self.logloss_train[-1], self.logloss_test[-1], self.auc_train[-1], self.auc_test[-1]) )
