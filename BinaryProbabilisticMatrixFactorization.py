@@ -27,6 +27,8 @@ class BPMF(object):
         self.logloss_test = []
         self.auc_train = []
         self.auc_test = []
+        self.acc_train = []
+        self.acc_test= []
         self.baseline_auc_test= []
         
         self.classification_train = []
@@ -198,11 +200,14 @@ class BPMF(object):
                     
                     y = train_vec[:, 2]
                     auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), linkx)
-
+                    acc = sklearn.metrics.accuracy_score(np.array(y, dtype=bool), linkx)
+                    
                     logloss =  np.sum(- np.multiply(y,logx) - np.multiply(1-y, lognx) )
                     obj = logloss \
                           + 0.5 * self._lambda * (np.linalg.norm(self.w_User) ** 2 + np.linalg.norm(self.w_Item) ** 2)
                     self.auc_train.append(auc)
+                    self.acc_train.append(acc)
+                    
                     self.logloss_train.append((obj / pairs_train))
 
                 # Compute validation error
@@ -231,8 +236,11 @@ class BPMF(object):
                     logloss = np.sum(- np.multiply(y,logx) - np.multiply(1-y, lognx) )
                     
                     auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), linkx)
+                    acc = sklearn.metrics.accuracy_score(np.array(y, dtype=bool), linkx)
+                    
                     baseline_auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), y2)
                     self.auc_test.append(auc)
+                    self.acc_test.append(acc)
                     self.baseline_auc_test.append(baseline_auc)
                     self.logloss_test.append((logloss) / (pairs_test))
 
@@ -240,8 +248,8 @@ class BPMF(object):
                     # plt.hist(self.alpha_Item)
                     # plt.show()
                     if batch == self.num_batches - 1:
-                        print('Training logloss: %f, Test logloss %f, Train AUC %f, Test AUC %f' \
-                              % (self.logloss_train[-1], self.logloss_test[-1], self.auc_train[-1], self.auc_test[-1]) )
+                        print('Training logloss: %f, Test logloss %f, Train AUC %f, Test AUC %f, Train acc %f, Test acc %f' \
+                              % (self.logloss_train[-1], self.logloss_test[-1], self.auc_train[-1], self.auc_test[-1], self.acc_train[-1], self.acc_test[-1]) )
 
     def predict(self, invID):
         x  = np.dot(self.w_Item, self.w_User[int(invID), :])

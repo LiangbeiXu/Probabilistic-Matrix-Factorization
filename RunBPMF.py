@@ -9,6 +9,9 @@ from BPMFSkill import BPMFSkill
 from BPMFSkillEncoded import BPMFSkillEncoded
 from PreprocessAssistment import PreprocessAssistmentSkillBuilder, PreprocessAssistmentProblemSkill
 
+def train_test_split():
+        
+
 if __name__ == "__main__":
     # file_path = "data/ml-100k/u.data"
     models = ['BPMFSkillEncode']
@@ -51,7 +54,7 @@ if __name__ == "__main__":
         elif model == 'BPMFSkillEncode':
             pmf = BPMFSkillEncoded()
             pmf.set_params({"num_feat": num_skills, "epsilon": 5, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                            "batch_size": 1000, 'dynamic':True})
+                            "batch_size": 1000, 'dynamic':False})
             if item == 'builder':
                 ratings = data.loc[:,['user_id', 'problem_id', 'correct', 'skill_ids', 'sCount', 'fCount']].values
                 order = list(data.loc[:]['hist'].values)

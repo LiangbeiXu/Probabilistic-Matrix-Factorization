@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import sklearn as sklearn
+from sklearn.metrics import accuracy_score, roc_auc_score
 import matplotlib.pyplot as plt
 
 class BPMFSkillEncoded(object):
@@ -27,6 +27,8 @@ class BPMFSkillEncoded(object):
         self.logloss_test = []
         self.auc_train = []
         self.auc_test = []
+        self.acc_train = []
+        self.acc_test = []
         self.baseline_auc_test= []
 
         self.classification_train = []
@@ -124,7 +126,7 @@ class BPMFSkillEncoded(object):
 
                 dw_Item = np.zeros((num_item, self.num_feat))
                 dw_User = np.zeros((num_user, self.num_feat))
-                dw_alpha = np.zeros((num_item, 1))
+                dw_alpha_item = np.zeros((num_item, 1))
                 dw_alpha_user = np.zeros((num_user, 1))
                 dw_gamma_Item = np.zeros((num_item, 1))
                 dw_gamma_User = np.zeros((num_user, 1))
@@ -142,7 +144,7 @@ class BPMFSkillEncoded(object):
                             continue
                         if len(hist) > 10:
                             hist = hist[0:9]
-                        dw_alpha[hist,:] +=  0.2 * gradlogloss[i] * np.matmul(self.w_Item[hist,: ], np.transpose(self.w_Item[[batch_ItemID[i]],:])) + self._lambda * self.alpha_Item[hist,:]
+                        dw_alpha_item[hist,:] +=  0.2 * gradlogloss[i] * np.matmul(self.w_Item[hist,: ], np.transpose(self.w_Item[[batch_ItemID[i]],:])) + self._lambda * self.alpha_Item[hist,:]
                         dw_alpha_user[user_id,:] +=  0.2 * gradlogloss[i] * \
                             np.sum(np.matmul(self.w_Item[hist,: ], np.transpose(self.w_Item[[batch_ItemID[i]],:])))+ \
                             self._lambda * self.alpha_User[user_id,:]
@@ -150,15 +152,14 @@ class BPMFSkillEncoded(object):
                 # Update with momentum
                 self.w_Item_inc = self.momentum * self.w_Item_inc + self.epsilon * dw_Item / self.batch_size
                 self.w_User_inc = self.momentum * self.w_User_inc + self.epsilon * dw_User / self.batch_size
-                self.alpha_Item_inc = self.momentum * self.alpha_Item_inc + self.epsilon * dw_alpha / self.batch_size
+                self.alpha_Item_inc = self.momentum * self.alpha_Item_inc + self.epsilon * dw_alpha_item / self.batch_size
                 self.alpha_User_inc = self.momentum * self.alpha_User_inc + self.epsilon * dw_alpha_user / self.batch_size
                 self.gamma_Item_inc = self.momentum * self.gamma_Item_inc + self.epsilon * dw_gamma_Item / self.batch_size
                 self.gamma_User_inc = self.momentum * self.gamma_User_inc + self.epsilon * dw_gamma_User / self.batch_size
                 self.gamma_inc = self.momentum * self.gamma_inc + self.epsilon * dw_gamma / self.batch_size
 
 
-                self.w_Item = self.w_Item - self.w_Item_inc
-
+                # self.w_Item = self.w_Item - self.w_Item_inc
                 self.w_User = self.w_User - self.w_User_inc
                 self.alpha_Item = self.alpha_Item - self.alpha_Item_inc
                 self.alpha_User = self.alpha_User - self.alpha_User_inc
@@ -202,12 +203,17 @@ class BPMFSkillEncoded(object):
                     lognx = np.log(1-linkx)
 
                     y = train_vec[:, 2]
-                    auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), linkx)
-
+                    auc = roc_auc_score(np.array(y, dtype=bool), linkx)
+                    pred = linkx
+                    pred[linkx<0.5] = 0
+                    pred[linkx>=0.5] = 1
+                    
+                    acc = accuracy_score(np.array(y, dtype=bool), np.array(pred, dtype=bool))
+                    self.auc_train.append(auc)
+                    self.acc_train.append(acc)        
                     logloss =  np.sum(- np.multiply(y,logx) - np.multiply(1-y, lognx) )
                     obj = logloss \
                           + 0.5 * self._lambda * (np.linalg.norm(self.w_User) ** 2 + np.linalg.norm(self.w_Item) ** 2)
-                    self.auc_train.append(auc)
                     self.logloss_train.append((obj / pairs_train))
 
                 # Compute validation error
@@ -235,18 +241,24 @@ class BPMFSkillEncoded(object):
                     y2 = self.mean_inv * np.ones(y.shape)
                     logloss = np.sum(- np.multiply(y,logx) - np.multiply(1-y, lognx) )
 
-                    auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), linkx)
-                    baseline_auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), y2)
+                    auc = roc_auc_score(np.array(y, dtype=bool), linkx)
+                    pred = linkx
+                    pred[linkx<0.5] = 0
+                    pred[linkx>=0.5] = 1
+                    acc = accuracy_score(np.array(y, dtype=bool), np.array(pred, dtype=bool))
                     self.auc_test.append(auc)
+                    self.acc_test.append(acc)
+                    
+                    baseline_auc = roc_auc_score(np.array(y, dtype=bool), y2)
                     self.baseline_auc_test.append(baseline_auc)
                     self.logloss_test.append((logloss) / (pairs_test))
 
                     # Print info
-                    plt.hist(self.alpha_Item)
-                    plt.show()
+                    #plt.hist(self.alpha_Item)
+                    #plt.show()
                     if batch == self.num_batches - 1:
-                        print('Training logloss: %f, Test logloss %f, Train AUC %f, Test AUC %f' \
-                              % (self.logloss_train[-1], self.logloss_test[-1], self.auc_train[-1], self.auc_test[-1]) )
+                        print('Training logloss: %f, Test logloss %f, Train AUC %f, Test AUC %f, Train acc %f, Test acc %f' \
+                              % (self.logloss_train[-1], self.logloss_test[-1], self.auc_train[-1], self.auc_test[-1], self.acc_train[-1], self.acc_test[-1]) )
 
     def predict(self, invID):
         x  = np.dot(self.w_Item, self.w_User[int(invID), :])

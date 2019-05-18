@@ -14,15 +14,16 @@ from PerformanceFactorAnalysis import PFA
 from copy import deepcopy
 import matplotlib.pyplot as plt
 import random
+import pickle
 
 # use split problem ids
 def PreprocessAssistment15(file_path):
     data = pd.read_csv(file_path,dtype={ 'log_id':np.int, \
         'sequence_id':np.int, 'user_id':np.int, 'correct':np.float})
     # data = data.rename(columns={'log_id': 'order_id', 'sequence_id': 'skill_id'})
-    print('# of records: %d.' %(data.shape[0]))
+    # print('# of records: %d.' %(data.shape[0]))
     data.dropna(inplace=True)
-    print('After dropping NaN rows, # of records: %d.' %(data.shape[0]))
+    # print('After dropping NaN rows, # of records: %d.' %(data.shape[0]))
     data.sort_values('order_id',ascending=True, inplace=True)
     data.correct = data.correct.astype(np.int)
     data.skill_id = data.skill_id.astype(np.int)
@@ -32,12 +33,12 @@ def PreprocessAssistment(file_path):
     data = pd.read_csv(file_path,dtype={'skill_name':np.str, 'order_id':np.int, \
         'problem_id':np.int, 'user_id':np.int, 'correct':np.int, 'original':np.int})
     data.drop(axis=1,columns='skill_name', inplace=True)
-    print('# of records: %d.' %(data.shape[0]))
+    # print('# of records: %d.' %(data.shape[0]))
     data.dropna(inplace=True)
-    print('After dropping NaN rows, # of records: %d.' %(data.shape[0]))
+    # print('After dropping NaN rows, # of records: %d.' %(data.shape[0]))
     data.sort_values('order_id',ascending=True, inplace=True)
     data.drop(data[ data.original==0 ].index, axis=0, inplace=True)
-    print('After dropping scafolding problems, # of records: %d.' %(data.shape[0]))
+    # print('After dropping scafolding problems, # of records: %d.' %(data.shape[0]))
     data.skill_id = data.skill_id.astype(np.int)
     return ReMapID_prob_skill_user(data)
 
@@ -63,7 +64,7 @@ def ReMapID_prob_skill_user(data):
     sid.sort()
     # change dtype of skill_id
     data.skill_id = data.skill_id.astype(np.int)
-    print(data.shape[0],  len(np.unique(uid)), len(np.unique(pid)), len(np.unique(sid)))
+    # print(data.shape[0],  len(np.unique(uid)), len(np.unique(pid)), len(np.unique(sid)))
     pdic = dict(zip(pid, list(range(0, len(pid)))))
     udic = dict(zip(uid, list(range(0, len(uid)))))
     sdic = dict(zip(sid, list(range(0, len(sid)))))
@@ -82,7 +83,7 @@ def ReMapID_skill_user(data):
     sid.sort()
     # change dtype of skill_id
     data.skill_id = data.skill_id.astype(np.int)
-    print(data.shape[0],  len(np.unique(uid)), len(np.unique(sid)))
+    # print(data.shape[0],  len(np.unique(uid)), len(np.unique(sid)))
 
     udic = dict(zip(uid, list(range(0, len(uid)))))
     sdic = dict(zip(sid, list(range(0, len(sid)))))
@@ -214,8 +215,8 @@ def PreprocessAssistmentSkillBuilder(file_path):
 
 
     # success. failure counts
-    sCnt = np.zeros(shape=(num_users, num_skills))
-    fCnt = np.zeros(shape=(num_users, num_skills))
+    sCnt = np.zeros(shape=(num_users, num_skills),dtype=np.int)
+    fCnt = np.zeros(shape=(num_users, num_skills),dtype=np.int)
     sCntList = []
     fCntList = []
 
@@ -230,7 +231,7 @@ def PreprocessAssistmentSkillBuilder(file_path):
             sCntList[index].append(deepcopy(sCnt[user_id][skill_id]))
             fCntList[index].append(deepcopy(fCnt[user_id][skill_id]))
             # update counts
-            if datanp[index, 3]:
+            if datanp[index, 4] == 1:
                 sCnt[user_id][skill_id]  += 1
             else:
                 fCnt[user_id][skill_id]  += 1
@@ -369,3 +370,65 @@ def RemoveLeastItemUser(data):
     prob_cnt_per_user = np.zeros((num_user))
     for i in range(data.shape[0]):
         prob_cnt_per_user[data.loc[i, 'user_id']] += 1
+
+def main():
+    dataDir = '/home/lxu/Documents/StudentLearningProcess/'
+    if 0:
+        # Assistment 09
+        dataPath = dataDir + 'skill_builder_data_corrected_withskills_section.csv'
+        items = ['skill', 'problem']
+        for item in items:
+            data = PreprocessAssistmentProblemSkill(dataPath, item)
+            pickle_name = 'Assistment09-' + item + '.pickle'
+            pickle_out = open(dataDir+ pickle_name,"wb")
+            pickle.dump(data, pickle_out)
+            pickle_out.close()
+            # read the pickle data to verify
+            pickle_in = open(dataDir + pickle_name, 'rb')
+            data_in = pickle.load(pickle_in)
+            # print(data_in.head())
+            for col in data_in.columns:
+                print(col)
+            print(data_in.iloc[0:10,:])
+
+    # another dataset
+    dataPath = dataDir + 'skill_builder_data_corrected_withskills_section.csv'
+    data, num_skills, prob_skill_map = PreprocessAssistmentSkillBuilder(dataPath)
+    pickle_name = 'Assistment09-' + 'skillbuilder' + '.pickle'
+    pickle_out = open(dataDir+ pickle_name,"wb")
+    data_new = {'data':data, 'skill_num': num_skills, 'prob_skill_map': prob_skill_map}
+    pickle.dump(data_new, pickle_out)
+    pickle_out.close()
+    # read the pickle data to verify
+    pickle_in = open(dataDir + pickle_name, 'rb')
+    dummy = pickle.load(pickle_in)
+    data_in = dummy['data']
+    # print(data_in.head())
+    # for col in data_in.columns:
+    #     print(col)
+    print(data_in.iloc[0:10,:])
+
+    # Assistment 15
+    dataPath = dataDir + '2015_ASSISTment.csv'
+    items = ['skill']
+    for item in items:
+        # data = PreprocessAssistment15(dataPath)
+        # pickle_name = 'Assistment15-' + item + '.pickle'
+        # pickle_out = open(dataDir+ pickle_name,"wb")
+        # pickle.dump(data, pickle_out)
+        # pickle_out.close()
+        # read the pickle data to verify
+        pickle_name = 'Assistment15-skill.pickle'
+        pickle_in = open(dataDir + pickle_name, 'rb')
+        data_in = pickle.load(pickle_in)
+        # print(data_in.head())
+        for col in data_in.columns:
+            print(col)
+        print(data_in.dtypes)
+        print(data_in.iloc[0:10,:])
+
+    # to read them and test
+
+if __name__ == '__main__':
+    main()
+

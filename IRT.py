@@ -7,13 +7,13 @@ Created on Tue Apr  2 11:12:06 2019
 """
 
 import numpy as np
-import sklearn as sklearn
+from sklearn.metrics import accuracy_score, roc_auc_score
 import itertools
 
 class IRT(object):
-    def __init__(self, epsilon=1, _lambda=0.1, momentum=0.8, maxepoch=20, num_batches=300, batch_size=1000, \
+    def __init__(self, epsilon=1, _lambda=0.1, momentum=0.8, maxepoch=20, num_batches=300, batch_size=1000,\
                  problem=False, multi_skills=False, user_skill=False, user_prob=False, PFA=False, MF=False, \
-                 num_feat=5, MF_skill=False, user=True, skill_dyn_embeddding=False):
+                 num_feat=20, MF_skill=False, user=True, skill_dyn_embeddding=False, skill=True, global_bias=True):
 
         self.epsilon = epsilon  # learning rate,
         self._lambda = _lambda  # L2 regularization,
@@ -32,9 +32,11 @@ class IRT(object):
         self.MF_skill = MF_skill
         self.user = user
         self.skill_dyn_embeddding = skill_dyn_embeddding
+        self.skill = skill
+        self.global_bias = global_bias
 
 
-        self.beta_skill = None
+        self.beta_skill = None # bias
         self.beta_prob = None
         self.beta_user = None
         self.beta_global = None
@@ -46,12 +48,12 @@ class IRT(object):
         self.w_user = None  # user feature vectors
         self.w_skill = None  # skill feature vectors
 
-        self.alpha_user = None
-        self.alpha_prob = None
-        self.alpha_skill = None
+        self.alpha_user = None # interaction
+        self.alpha_prob = None # interaction
+        self.alpha_skill = None # interaction
 
-        self.h_user = None
-        self.h_skill = None
+        self.h_user = None # dynamic, user learning ability
+        self.h_skill = None # dynamic, skill teaching ability
 
         self.beta_skill_inc = None
         self.beta_prob_inc = None
@@ -72,6 +74,8 @@ class IRT(object):
         self.logloss_test = []
         self.auc_train = []
         self.auc_test = []
+        self.acc_train = []
+        self.acc_test= []
         self.baseline_auc_test= []
 
         self.classification_train = []
@@ -333,10 +337,12 @@ class IRT(object):
 
 
                 # select models
-                # self.beta_skill.fill(0)
+                if not self.skill:
+                    self.beta_skill.fill(0)
                 # self.beta_prob.fill(0)
                 # self.beta_user.fill(0)
-                # self.beta_global.fill(0)
+                if not self.global_bias:
+                    self.beta_global.fill(0)
 
                 # Compute Objective Function after
                 if batch == self.num_batches - 1:
@@ -348,8 +354,15 @@ class IRT(object):
 
                     y = train_vec.loc[:, 'correct'].values
                     logloss =  np.sum(- np.multiply(y,logx) - np.multiply(1-y, lognx))
-                    auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), linkx)
+                    auc = roc_auc_score(np.array(y, dtype=bool), linkx)
+                    pred = linkx
+                    pred[linkx<0.5] = 0
+                    pred[linkx>=0.5] = 1
+                    
+                    acc = accuracy_score(np.array(y, dtype=bool), np.array(pred, dtype=bool))
                     self.auc_train.append(auc)
+                    self.acc_train.append(acc)
+                    
                     obj = logloss + 0.5 * self._lambda * ( np.linalg.norm(self.beta_skill) ** 2 + np.linalg.norm(self.beta_prob) ** 2 + \
                          np.linalg.norm(self.beta_user) ** 2) + self.beta_global ** 2
 
@@ -364,13 +377,18 @@ class IRT(object):
                     lognx = np.log(1-linkx)
                     y = test_vec.loc[:, 'correct'].values
                     logloss =  np.sum(- np.multiply(y,logx) - np.multiply(1-y, lognx))
-                    auc = sklearn.metrics.roc_auc_score(np.array(y, dtype=bool), linkx)
+                    auc = roc_auc_score(np.array(y, dtype=bool), linkx)
+                    pred = linkx
+                    pred[linkx<0.5] = 0
+                    pred[linkx>=0.5] = 1
+                    acc = accuracy_score(np.array(y, dtype=bool), np.array(pred, dtype=bool))
                     self.auc_test.append(auc)
+                    self.acc_test.append(acc)
                     self.logloss_test.append((logloss) / (pairs_test))
                     # Print info
                     if batch == self.num_batches - 1:
-                        print('Training logloss: %f, Test logloss %f, Train AUC %f, Test AUC %f' \
-                              % (self.logloss_train[-1], self.logloss_test[-1], self.auc_train[-1], self.auc_test[-1]) )
+                        print('Training logloss: %f, Train ACC %f, Train AUC %f, Test logloss %f, Test ACC %f, Test AUC %f' \
+                              % (self.logloss_train[-1], self.acc_train[-1], self.auc_train[-1], self.auc_test[-1], self.acc_test[-1], self.auc_test[-1]) )
 
     def CalcPrediction(self, data):
         if self.user or self.user_prob or self.user_skill:
