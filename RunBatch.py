@@ -101,6 +101,19 @@ model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40
 model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
 models.append([dataset_name, name, model])
 
+
+
+
+name =  'globa + user + prob + MF'
+print(dataset_name, name)
+model= IRT(epsilon=4, _lambda=0.1, momentum=0.8, maxepoch=50, num_batches=300, batch_size=1000,\
+                 problem=True, multi_skills=False, user_skill=False, user_prob=False, PFA=False, MF=True,\
+                 num_feat=16, MF_skill=False, user=True, skill_dyn_embeddding=False, skill=False, global_bias=False)
+model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
+models.append([dataset_name, name, model])
+
+
+
 # skill and problem
 ratings = data.loc[:,['user_id', 'problem_id', 'correct', 'skill_ids', 'sCount', 'fCount']].values
 order = list(data.loc[:]['hist'].values)
@@ -110,6 +123,17 @@ train = ratings[0:-int(test_size),:]
 # print(len(order))
 order_test = order[-int(test_size):]
 order_train = order[0:-int(test_size)]
+
+
+
+name =  'globa + user + prob + encoded prob_latent_matrix + dynamic'
+print(dataset_name, name)
+model= BPMFSkillEncoded()
+model.set_params({"num_feat": num_skills, "epsilon": 5, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                "batch_size": 1000, 'dynamic':True})
+
+model.fit(train, test, order_train, order_test, len(np.unique(ratings[:, 0])), len(np.unique(ratings[:, 1])), prob_skill_map)
+models.append([dataset_name, name, model])
 
  
 name =  'globa + user + prob + encoded prob_latent_matrix'
@@ -134,10 +158,9 @@ models.append([dataset_name, name, model])
 
 # Assistment-15
 
-dataset_name =  '2015_ASSISTment.pickle'
-file_path = '/home/lxu/Documents/StudentLearningProcess/' + dataset_name
-data = pd.read_pickle(file_path)
-data = data.sort_values(by=['order_id'])
+dataset_name =  'Assistment15-skill.csv'
+file_path = '../' + dataset_name
+data = pd.read_csv(file_path)
 print('ASSISTment 14-15 statistics ', data.shape[0],  len(np.unique(data['user_id'])), len(np.unique(data['skill_id'])))
 # prepare data
 datanp = data.iloc[:,0:-1].values
@@ -217,8 +240,6 @@ model.fit(train, test, len(np.unique(data['user_id'])), len(np.unique(data['skil
 models.append([dataset_name, name, model])
 
 
-
- 
 name =  'global + user  + skill + pfa + user_skill'
 print(dataset_name, name)
 model = IRT()

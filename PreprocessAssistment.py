@@ -380,6 +380,12 @@ def main():
         for item in items:
             data = PreprocessAssistmentProblemSkill(dataPath, item)
             pickle_name = 'Assistment09-' + item + '.pickle'
+
+            #
+            csv_name = 'Assistment09-' + item + '.csv'
+            data_new = data[['user_id', item+'_id', 'correct', 'order_id']]
+            data_new.to_csv(dataDir + csv_name)
+
             pickle_out = open(dataDir+ pickle_name,"wb")
             pickle.dump(data, pickle_out)
             pickle_out.close()
@@ -390,29 +396,34 @@ def main():
             for col in data_in.columns:
                 print(col)
             print(data_in.iloc[0:10,:])
+    if 0:
+        # another dataset
+        dataPath = dataDir + 'skill_builder_data_corrected_withskills_section.csv'
+        data, num_skills, prob_skill_map = PreprocessAssistmentSkillBuilder(dataPath)
+        pickle_name = 'Assistment09-' + 'skillbuilder' + '.pickle'
 
-    # another dataset
-    dataPath = dataDir + 'skill_builder_data_corrected_withskills_section.csv'
-    data, num_skills, prob_skill_map = PreprocessAssistmentSkillBuilder(dataPath)
-    pickle_name = 'Assistment09-' + 'skillbuilder' + '.pickle'
-    pickle_out = open(dataDir+ pickle_name,"wb")
-    data_new = {'data':data, 'skill_num': num_skills, 'prob_skill_map': prob_skill_map}
-    pickle.dump(data_new, pickle_out)
-    pickle_out.close()
-    # read the pickle data to verify
-    pickle_in = open(dataDir + pickle_name, 'rb')
-    dummy = pickle.load(pickle_in)
-    data_in = dummy['data']
-    # print(data_in.head())
-    # for col in data_in.columns:
-    #     print(col)
-    print(data_in.iloc[0:10,:])
+        pickle_out = open(dataDir+ pickle_name,"wb")
+        data_new = {'data':data, 'skill_num': num_skills, 'prob_skill_map': prob_skill_map}
+        pickle.dump(data_new, pickle_out)
+        pickle_out.close()
+        # read the pickle data to verify
+        pickle_in = open(dataDir + pickle_name, 'rb')
+        dummy = pickle.load(pickle_in)
+        data_in = dummy['data']
+        # print(data_in.head())
+        # for col in data_in.columns:
+        #     print(col)
+        print(data_in.iloc[0:10,:])
 
     # Assistment 15
     dataPath = dataDir + '2015_ASSISTment.csv'
     items = ['skill']
     for item in items:
-        # data = PreprocessAssistment15(dataPath)
+        data = PreprocessAssistment15(dataPath)
+        csv_name = 'Assistment15-' + item + '.csv'
+        data_new = data[['user_id', item+'_id', 'correct', 'order_id']]
+        data_new.to_csv(dataDir + csv_name)
+        
         # pickle_name = 'Assistment15-' + item + '.pickle'
         # pickle_out = open(dataDir+ pickle_name,"wb")
         # pickle.dump(data, pickle_out)

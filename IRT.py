@@ -13,7 +13,8 @@ import itertools
 class IRT(object):
     def __init__(self, epsilon=1, _lambda=0.1, momentum=0.8, maxepoch=20, num_batches=300, batch_size=1000,\
                  problem=False, multi_skills=False, user_skill=False, user_prob=False, PFA=False, MF=False, \
-                 num_feat=20, MF_skill=False, user=True, skill_dyn_embeddding=False, skill=True, global_bias=True):
+                 num_feat=20, MF_skill=False, user=True, skill_dyn_embeddding=False, skill=True, global_bias=True,
+                 problem_dyn_embedding=False):
 
         self.epsilon = epsilon  # learning rate,
         self._lambda = _lambda  # L2 regularization,
@@ -32,6 +33,7 @@ class IRT(object):
         self.MF_skill = MF_skill
         self.user = user
         self.skill_dyn_embeddding = skill_dyn_embeddding
+        self.problem_dyn_embedding = problem_dyn_embedding
         self.skill = skill
         self.global_bias = global_bias
 
@@ -41,7 +43,7 @@ class IRT(object):
         self.beta_user = None
         self.beta_global = None
 
-        self.gamma = None  #  success
+        self.gamma = None  # success
         self.rho = None  # failure
 
         self.w_prob = None  # problem feature vectors
@@ -54,6 +56,7 @@ class IRT(object):
 
         self.h_user = None # dynamic, user learning ability
         self.h_skill = None # dynamic, skill teaching ability
+
 
         self.beta_skill_inc = None
         self.beta_prob_inc = None
@@ -114,9 +117,9 @@ class IRT(object):
         self.beta_user_inc = np.zeros(num_user)
         self.beta_global_inc = np.zeros(1)
 
-        self.alpha_skill_inc =  0.1 * np.random.randn(num_skill)
-        self.alpha_prob_inc = 0.1 * np.random.randn(num_prob)
-        self.alpha_user_inc = 0.1 * np.random.randn(num_user)
+        self.alpha_skill_inc = 0.0 * np.random.randn(num_skill)
+        self.alpha_prob_inc = 0.0 * np.random.randn(num_prob)
+        self.alpha_user_inc = 0.0 * np.random.randn(num_user)
 
         self.gamma_inc = np.zeros(num_skill)
         self.rho_inc = np.zeros(num_skill)
@@ -170,19 +173,22 @@ class IRT(object):
                 if self.multi_skills:
                     batch_skillIDs = train_vec.loc[shuffled_order[batch_idx], 'skill_ids'].values
                 else:
-                    batch_skillID = train_vec.loc[shuffled_order[batch_idx], 'skill_id'].values
+                    if self.skill:
+                        batch_skillID = train_vec.loc[shuffled_order[batch_idx], 'skill_id'].values
 
                 # gradient of global, user, skill, prob means
-                dw_beta_global = dw_beta_global + 2 * np.sum(gradlogloss) + self._lambda * self.beta_global
+                if self.global_bias:
+                    dw_beta_global = dw_beta_global + 2 * np.sum(gradlogloss) + self._lambda * self.beta_global
 
                 if self.multi_skills:
                     for i in range(self.batch_size):
                         for idx, skill in enumerate(batch_skillIDs[i]):
                             dw_beta_skill[skill]  += 2 * gradlogloss[i] / len(batch_skillIDs[i]) + self._lambda * self.beta_skill[skill]
                 else:
-                    beta_skill_grad  = 2 * gradlogloss + self._lambda * self.beta_skill[batch_skillID]
-                    for i in range(self.batch_size):
-                        dw_beta_skill[batch_skillID[i]]  += beta_skill_grad[i]
+                    if self.skill:
+                        beta_skill_grad  = 2 * gradlogloss + self._lambda * self.beta_skill[batch_skillID]
+                        for i in range(self.batch_size):
+                            dw_beta_skill[batch_skillID[i]]  += beta_skill_grad[i]
                 if self.user:
                     beta_user_grad = 2 * gradlogloss + self._lambda * self.beta_user[batch_userID]
                     for i in range(self.batch_size):
@@ -286,9 +292,12 @@ class IRT(object):
                             dw_h_user[batch_userID[i], :] = dw_h_user[batch_userID[i], :] + Ix_user[i, :]
 
                 # Update with momentum
-                self.beta_skill_inc  = self.momentum * self.beta_skill_inc  + self.epsilon * dw_beta_skill  / self.batch_size
-                self.beta_user_inc = self.momentum * self.beta_user_inc + self.epsilon * dw_beta_user / self.batch_size
-                self.beta_global_inc = self.momentum * self.beta_global_inc + self.epsilon * dw_beta_global / self.batch_size
+                if self.skill:
+                    self.beta_skill_inc  = self.momentum * self.beta_skill_inc  + self.epsilon * dw_beta_skill  / self.batch_size
+                if self.user:
+                    self.beta_user_inc = self.momentum * self.beta_user_inc + self.epsilon * dw_beta_user / self.batch_size
+                if self.global_bias:
+                    self.beta_global_inc = self.momentum * self.beta_global_inc + self.epsilon * dw_beta_global / self.batch_size
                 if self.problem:
                     self.beta_prob_inc = self.momentum * self.beta_prob_inc + self.epsilon * dw_beta_prob / self.batch_size
                 if self.PFA:
@@ -311,9 +320,12 @@ class IRT(object):
                     self.h_skill_inc = self.momentum * self.h_skill_inc + self.epsilon * dw_h_skill / self.batch_size
 
                 # gradien descent
-                self.beta_global = self.beta_global - self.beta_global_inc
-                self.beta_skill  = self.beta_skill  - self.beta_skill_inc
-                self.beta_user = self.beta_user - self.beta_user_inc
+                if self.global_bias:
+                    self.beta_global = self.beta_global - self.beta_global_inc
+                if self.skill:
+                    self.beta_skill  = self.beta_skill  - self.beta_skill_inc
+                if self.user:
+                    self.beta_user = self.beta_user - self.beta_user_inc
                 if self.problem:
                     self.beta_prob = self.beta_prob - self.beta_prob_inc
                 if self.user_skill or  self.user_prob:
@@ -388,7 +400,17 @@ class IRT(object):
                     # Print info
                     if batch == self.num_batches - 1:
                         print('Training logloss: %f, Train ACC %f, Train AUC %f, Test logloss %f, Test ACC %f, Test AUC %f' \
-                              % (self.logloss_train[-1], self.acc_train[-1], self.auc_train[-1], self.auc_test[-1], self.acc_test[-1], self.auc_test[-1]) )
+                              % (self.logloss_train[-1], self.acc_train[-1], self.auc_train[-1], self.logloss_test[-1], self.acc_test[-1], self.auc_test[-1]) )
+
+
+
+    def predict(self, data):
+        x = self.CalcPrediction(data)
+        expnx = np.exp(-x)
+        linkx = np.divide(1, (1+expnx))
+        return linkx
+
+
 
     def CalcPrediction(self, data):
         if self.user or self.user_prob or self.user_skill:
@@ -410,17 +432,22 @@ class IRT(object):
                     x2[i] = np.sum(np.multiply(self.rho[batch_skillIDs[i]], f_counts[i]))
                 x3[i] = np.sum(self.beta_skill[batch_skillIDs[i]]) / len(batch_skillIDs[i])
                 x4[i] = np.sum(self.alpha_skill[batch_skillIDs[i]]) / len(batch_skillIDs[i])
-            x = x + x3  + self.beta_global
+            x = x + x3
             if self.user_skill:
                 x = x + np.multiply(x4, self.alpha_user[batch_userID] )
         else:
-            batch_skillID = np.array(data.loc[:, 'skill_id'], dtype='int32')
+            if self.skill or self.user_skill:
+                batch_skillID = np.array(data.loc[:, 'skill_id'], dtype='int32')
             if self.PFA:
                 x1 = np.multiply(data.loc[:, 'sCount'].values, self.gamma[batch_skillID])
                 x2 = np.multiply(data.loc[:, 'fCount'].values, self.rho[batch_skillID])
-            x = x + self.beta_skill[batch_skillID]  + self.beta_global
+            if self.skill:
+                x = x + self.beta_skill[batch_skillID]
+
             if self.user_skill:
                 x = x + np.multiply(self.alpha_skill[batch_skillID], self.alpha_user[batch_userID])
+        if self.global_bias:
+                x = x + self.beta_global
         if self.user:
             x = x + self.beta_user[batch_userID]
         if self.problem:
@@ -477,6 +504,7 @@ class IRT(object):
             self.MF_skill = parameters.get('MF_skill', False)
             self.user = parameters.get('user', True)
             self.skill_dyn_embeddding = parameters.get('skill_dyn_embeddding', False)
+            self.problem_dyn_embeddding = parameters.get('problem_dyn_embeddding', False)
         if self.MF:
             self.problem = True
         if self.user_prob:
