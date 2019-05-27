@@ -8,12 +8,12 @@ Created on Tue Apr  2 11:12:06 2019
 
 import numpy as np
 from sklearn.metrics import accuracy_score, roc_auc_score
-import itertools
+
 
 class IRT2(object):
     def __init__(self, epsilon=1, _lambda=0.1, momentum=0.8, maxepoch=20, num_batches=300, batch_size=1000,
                     problem=True, MF=True, num_feat=20, user=True,  global_bias=True,
-                    problem_dyn_embedding=False):
+                    problem_dyn_embedding=False, patience = 5):
 
         self.epsilon = epsilon  # learning rate,
         self._lambda = _lambda  # L2 regularization,
@@ -27,6 +27,7 @@ class IRT2(object):
         self.user = user
         self.problem_dyn_embedding = problem_dyn_embedding
         self.global_bias = global_bias
+        self.patience = patience
 
         self.beta_prob = None
         self.beta_user = None
@@ -51,7 +52,6 @@ class IRT2(object):
         self.w_prob_inc = None  # problem feature vectors
         self.w_user_inc = None  # user feature vectors
 
-
         self.h_prob_inc = None
         self.h_user_inc  = None
 
@@ -66,10 +66,13 @@ class IRT2(object):
         self.classification_train = []
         self.classification_test = []
 
-
     def fit(self, train_vec, test_vec,  num_user, num_prob):
         pairs_train = train_vec.shape[0]
         pairs_test = test_vec.shape[0]
+        if self.problem_dyn_embedding:
+            train_order = train_vec['hist'].values
+            test_order = test_vec['hist'].values
+
 
         # average scores
         self.epoch = 0
@@ -80,73 +83,123 @@ class IRT2(object):
         self.beta_global = 0.1 * np.random.randn(1)
         self.w_prob = 0.1 * np.random.rand(num_prob, self.num_feat)  # problem latent matrix
         self.w_user = 0.1 * np.random.randn(num_user, self.num_feat)  # user latent matrix
+        self.h_prob = 0.01 * np.random.randn(num_prob)
+        self.h_user = 0.01 * np.random.randn(num_user)
 
         self.beta_prob_inc = np.zeros(num_prob)
         self.beta_user_inc = np.zeros(num_user)
         self.beta_global_inc = np.zeros(1)
         self.w_prob_inc = np.zeros((num_prob, self.num_feat))
         self.w_user_inc = np.zeros((num_user, self.num_feat))
+        self.h_prob_inc = 0 * np.random.randn(num_prob)
+        self.h_user_inc = 0 * np.random.randn(num_user)
 
+        self.dyn_flag = False
+        best_metric = []
+        patience_cnt = 0
+        stop_flag = False
         while self.epoch < self.maxepoch:
             self.epoch += 1
             # shuffle training tuples
             shuffled_order = np.arange(pairs_train)
             np.random.shuffle(shuffled_order)
-
+            if stop_flag:
+                break
             # batch update
             for batch in range(self.num_batches):
                 test = np.arange(self.batch_size * batch, self.batch_size * (batch + 1))
                 batch_idx = np.mod(test, shuffled_order.shape[0])  # index used in this batch
 
                 # compute gradient of obj
-                x = self.CalcPrediction(train_vec.loc[shuffled_order[batch_idx], :])
+                if self.dyn_flag:
+                    x = self.calc_prediction(train_vec.loc[shuffled_order[batch_idx], :],
+                                             train_order[shuffled_order[batch_idx]])
+                else:
+                    x = self.calc_prediction(train_vec.loc[shuffled_order[batch_idx], :],
+                                             None)
                 expnx = np.exp(-x)
                 linkx = np.divide(1, (1+expnx))
                 y = train_vec.loc[shuffled_order[batch_idx], 'correct'].values
                 gradlogloss = -  np.multiply(y, 1-linkx) + np.multiply(1-y, linkx)
+                if 1:
+                    if self.global_bias:
+                        dw_beta_global = np.zeros(1)
+                        dw_beta_global = dw_beta_global + 2 * np.sum(gradlogloss)
+                        self.beta_global_inc = self.momentum * self.beta_global_inc + self.epsilon * dw_beta_global / self.batch_size
+                        self.beta_global = self.beta_global - self.beta_global_inc
 
-                if self.global_bias:
-                    dw_beta_global = np.zeros(1)
-                    dw_beta_global = dw_beta_global + 2 * np.sum(gradlogloss)
-                    self.beta_global_inc = self.momentum * self.beta_global_inc + self.epsilon * dw_beta_global / self.batch_size
-                    self.beta_global = self.beta_global - self.beta_global_inc
+                    if self.user:
+                        dw_beta_user = np.zeros(num_user)
+                        batch_userid = np.array(train_vec.loc[shuffled_order[batch_idx], 'user_id'], dtype='int32')
+                        beta_user_grad = 2 * gradlogloss + self._lambda * self.beta_user[batch_userid]
+                        for i in range(self.batch_size):
+                            dw_beta_user[batch_userid[i]]  += beta_user_grad[i]
+                        self.beta_user_inc = self.momentum * self.beta_user_inc + self.epsilon * dw_beta_user / self.batch_size
+                        self.beta_user = self.beta_user - self.beta_user_inc
 
-                if self.user:
-                    dw_beta_user = np.zeros(num_user)
-                    batch_userid = np.array(train_vec.loc[shuffled_order[batch_idx], 'user_id'], dtype='int32')
-                    beta_user_grad = 2 * gradlogloss + self._lambda * self.beta_user[batch_userid]
+                    if self.problem:
+                        dw_beta_prob = np.zeros(num_prob)
+                        batch_probid = np.array(train_vec.loc[shuffled_order[batch_idx], 'problem_id'], dtype='int32')
+                        beta_prob_grad = 2 * gradlogloss + self._lambda * self.beta_prob[batch_probid]
+                        for i in range(self.batch_size):
+                            dw_beta_prob[batch_probid[i]]  += beta_prob_grad[i]
+                        self.beta_prob_inc = self.momentum * self.beta_prob_inc + self.epsilon * dw_beta_prob / self.batch_size
+                        self.beta_prob = self.beta_prob - self.beta_prob_inc
+
+                    if self.MF:
+                        Ix_user = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_prob[batch_probid, :]) \
+                           + self._lambda * self.w_user[batch_userid, :]
+                        Ix_prob = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_user[batch_userid, :]) \
+                           + self._lambda * (self.w_prob[batch_probid, :])    # np.newaxis :increase the dimension
+                        dw_prob = np.zeros((num_prob, self.num_feat))
+                        dw_user = np.zeros((num_user, self.num_feat))
+                        for i in range(self.batch_size):
+                            dw_prob[batch_probid[i], :] = dw_prob[batch_probid[i], :] + Ix_prob[i, :]
+                            dw_user[batch_userid[i], :] = dw_user[batch_userid[i], :] + Ix_user[i, :]
+                        self.w_user_inc = self.momentum * self.w_user_inc + self.epsilon * dw_user / self.batch_size
+                        self.w_prob_inc = self.momentum * self.w_prob_inc + self.epsilon * dw_prob / self.batch_size
+                        self.w_prob = self.w_prob - self.w_prob_inc
+                        self.w_user = self.w_user - self.w_user_inc
+
+                if self.dyn_flag:
+
+                    if 0:
+                        Ix_user = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_prob[batch_probid, :]) \
+                           + self._lambda * self.w_user[batch_userid, :]
+
+                        dw_user = np.zeros((num_user, self.num_feat))
+                        for i in range(self.batch_size):
+                            dw_user[batch_userid[i], :] = dw_user[batch_userid[i], :] + Ix_user[i, :]
+                        self.w_user_inc = self.momentum * self.w_user_inc + self.epsilon * dw_user / self.batch_size
+
+                        self.w_user = self.w_user - self.w_user_inc
+
                     for i in range(self.batch_size):
-                        dw_beta_user[batch_userid[i]]  += beta_user_grad[i]
-                    self.beta_user_inc = self.momentum * self.beta_user_inc + self.epsilon * dw_beta_user / self.batch_size
-                    self.beta_user = self.beta_user - self.beta_user_inc
-
-                if self.problem:
-                    dw_beta_prob = np.zeros(num_prob)
-                    batch_probid = np.array(train_vec.loc[shuffled_order[batch_idx], 'problem_id'], dtype='int32')
-                    beta_prob_grad = 2 * gradlogloss + self._lambda * self.beta_prob[batch_probid]
-                    for i in range(self.batch_size):
-                        dw_beta_prob[batch_probid[i]]  += beta_prob_grad[i]
-                    self.beta_prob_inc = self.momentum * self.beta_prob_inc + self.epsilon * dw_beta_prob / self.batch_size
-                    self.beta_prob = self.beta_prob - self.beta_prob_inc
-
-                if self.MF:
-                    Ix_user = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_prob[batch_probid, :]) \
-                       + self._lambda * self.w_user[batch_userid, :]
-                    Ix_prob = 2 * np.multiply(gradlogloss[:, np.newaxis], self.w_user[batch_userid, :]) \
-                       + self._lambda * (self.w_prob[batch_probid, :])    # np.newaxis :increase the dimension
-                    dw_prob = np.zeros((num_prob, self.num_feat))
-                    dw_user = np.zeros((num_user, self.num_feat))
-                    for i in range(self.batch_size):
-                        dw_prob[batch_probid[i], :] = dw_prob[batch_probid[i], :] + Ix_prob[i, :]
-                        dw_user[batch_userid[i], :] = dw_user[batch_userid[i], :] + Ix_user[i, :]
-                    self.w_user_inc = self.momentum * self.w_user_inc + self.epsilon * dw_user / self.batch_size
-                    self.w_prob_inc = self.momentum * self.w_prob_inc + self.epsilon * dw_prob / self.batch_size
-                    self.w_prob = self.w_prob - self.w_prob_inc
-                    self.w_user = self.w_user - self.w_user_inc
+                        dw_h_prob= np.zeros(num_prob)
+                        dw_h_user = np.zeros(num_user)
+                        hist = train_order[shuffled_order[i]]
+                        user_id = train_vec.loc[:, 'user_id'].values[shuffled_order[i]]
+                        if len(hist) == 0:
+                            continue
+                        if len(hist) > 10:
+                            hist = hist[0:9]
+                        dw_h_prob[hist] += 2 * gradlogloss[i] * np.matmul(self.w_prob[hist, :],
+                            np.transpose(self.w_prob[[batch_probid[i]], :])).flatten() * self.h_user[user_id] + self._lambda * self.h_prob[hist]
+                        dw_h_user[user_id] += 2 * gradlogloss[i] * np.sum(np.matmul(self.w_prob[hist, :],
+                            np.transpose(self.w_prob[[batch_probid[i]], :])).flatten() * self.h_prob[hist]) + self._lambda * self.h_user[user_id]
+                    self.h_prob_inc = self.momentum * self.h_prob_inc + self.epsilon * dw_h_prob / self.batch_size
+                    self.h_user_inc = self.momentum * self.h_user_inc + self.epsilon * dw_h_user / self.batch_size
+                    # print('Change', np.linalg.norm(self.h_user_inc))
+                    self.h_prob = self.h_prob - self.h_prob_inc
+                    self.h_user = self.h_user - self.h_user_inc
 
                 # Compute Objective Function after
                 if batch == self.num_batches - 1:
-                    logloss, auc, acc = self.calc_loss(train_vec, train_vec.loc[:, 'correct'].values)
+                    if self.dyn_flag:
+                        logloss, auc, acc = self.calc_loss(train_vec, train_order, train_vec.loc[:, 'correct'].values)
+                    else:
+                        logloss, auc, acc = self.calc_loss(train_vec, None, train_vec.loc[:, 'correct'].values)
+
                     self.auc_train.append(auc)
                     self.acc_train.append(acc)
                     obj = logloss
@@ -154,19 +207,41 @@ class IRT2(object):
 
                 # Compute validation error
                 if batch == self.num_batches - 1:
-                    logloss, auc, acc = self.calc_loss(test_vec, test_vec.loc[:, 'correct'].values)
+                    if self.dyn_flag:
+                        logloss, auc, acc = self.calc_loss(test_vec, test_order, test_vec.loc[:, 'correct'].values)
+                    else:
+                        logloss, auc, acc = self.calc_loss(test_vec, None, test_vec.loc[:, 'correct'].values)
+
                     self.auc_test.append(auc)
                     self.acc_test.append(acc)
                     self.logloss_test.append(logloss/pairs_test)
-                    # Print info
-                    if batch == self.num_batches - 1:
-                        print('Training logloss: %f, Train ACC %f, Train AUC %f, Test logloss %f, Test ACC %f, Test AUC %f' \
-                              % (self.logloss_train[-1], self.acc_train[-1], self.auc_train[-1], self.logloss_test[-1], self.acc_test[-1], self.auc_test[-1]) )
 
+                    if not best_metric:
+                        best_metric = auc
+                    else:
+                        if best_metric > auc:
+                            patience_cnt += 1
+                        else:
+                            patience_cnt = 0
+                            best_metric = auc
 
+                    # print('Patient:', patience_cnt)
+                    print('Training logloss: %f, Train ACC %f, Train AUC %f, Test logloss %f, Test ACC %f, Test AUC %f. Best so far %f.' \
+                          % (self.logloss_train[-1], self.acc_train[-1], self.auc_train[-1], self.logloss_test[-1], self.acc_test[-1], self.auc_test[-1], best_metric))
 
-    def calc_loss(self, X, y):
-        x = self.CalcPrediction(X)
+                    if (patience_cnt >= self.patience) or (self.epoch == self.maxepoch):
+                        if self.problem_dyn_embedding and (not self.dyn_flag):
+                            print('Tune dynamic model...')
+                            self.dyn_flag = True
+                            best_metric = []
+                            self.epoch = 0
+                            patience_cnt = 0
+                            self.maxepoch = 20
+                        else:
+                            stop_flag = True
+
+    def calc_loss(self, X, order, y):
+        x = self.calc_prediction(X, order)
         expnx = np.exp(-x)
         linkx = np.divide(1, (1+expnx))
         logx = np.log(linkx)
@@ -179,9 +254,7 @@ class IRT2(object):
         acc = accuracy_score(np.array(y, dtype=bool), np.array(pred, dtype=bool))
         return logloss, auc, acc
 
-
-
-    def CalcPrediction(self, data):
+    def calc_prediction(self, data, order):
         x = np.zeros(data.shape[0])
         if self.global_bias:
             x = x + self.beta_global
@@ -195,11 +268,20 @@ class IRT2(object):
                 x = x + self.beta_prob[batch_probid]
         if self.MF:
             x = x + np.sum(np.multiply(self.w_user[batch_userid, :], self.w_prob[batch_probid, :]), axis=1)
-        if self.problem_dyn_embedding:
-            print('Not implemented yet!')
+        if self.dyn_flag:
+            sum_prob = np.zeros((data.shape[0], self.num_feat))
+            for i in range(self.batch_size):
+                hist = order[i]
+                user_id = data.loc[:, 'user_id'].values[i]
+                if len(hist) == 0:
+                    continue
+                if len(hist) > 10:
+                    hist = hist[0:9]
+                temp = np.outer(self.h_prob[hist] * self.h_user[user_id], np.ones(self.num_feat))
+                sum_prob[i, :] = np.sum(np.multiply(temp, self.w_prob[hist, :]), axis=0)
+            x = x + np.sum(np.multiply(sum_prob, self.w_prob[batch_probid, :]), axis=1)
 
         return x
-
 
     # ****************Set parameters by providing a parameter dictionary.  ***********#
     def set_params(self, parameters):
@@ -214,5 +296,5 @@ class IRT2(object):
             self.num_feat = parameters.get('num_feat', 5)
             self.problem = parameters.get('problem', False)
             self.user = parameters.get('user', True)
-            self.problem_dyn_embedding = parameters.get('problem_dyn_embedding', False)
-
+            self.dyn_flag = parameters.get('problem_dyn_embedding', False)
+            self.patience = parameters.get('patience', 10)
