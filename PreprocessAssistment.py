@@ -215,8 +215,6 @@ def PreprocessAssistmentSkillBuilder(file_path, option='multiskills'):
             new_skill_idx += 1
             multi_skills_set.append(skills)
 
-    if option == 'newskills':
-        num_skills = new_skill_idx
     for i in range(num_records):
         # order_in not found
         if not (datanp[i, 0] in order_id_set) :
@@ -229,11 +227,32 @@ def PreprocessAssistmentSkillBuilder(file_path, option='multiskills'):
     data_new_np = np.asarray(new_data)
 
     # generate skill_ids for each problem
-
     skill_id_values = list()
     for i in range(data_new_np.shape[0]):
-        skill_id_values.append(prob_skill_map[data_new_np[i,2]])
+        if option == 'multiskills':
+            skill_id_values.append(prob_skill_map[data_new_np[i,2]])
+        else:
+            skill_id_values.append(prob_skill_map[data_new_np[i,2]][0])
 
+
+    columnNames = list(data.head(0))
+    data_new = pd.DataFrame(data=data_new_np, columns=columnNames)
+    data_new.drop(axis=1,columns='skill_id', inplace=True)
+    if option == 'multiskills':
+        data_new['skill_ids'] = skill_id_values
+    elif option == 'newskills':
+        data_new['skill_id'] = skill_id_values
+        num_skills = new_skill_idx
+    else:
+        data_new['skill_id'] = skill_id_values
+        # CAREFUL: we delete entries with multiskills. need to remap IDs
+        data_new = ReMapID_prob_skill_user(data_new)
+        skill_id_values = data_new['skill_id'].values
+        data_new_np = data_new.values
+        # new statistics
+        prob_skill_map = GenerateProblemSkillsMap(data_new)
+        num_users = len(np.unique(data_new['user_id']))
+        num_skills = len(np.unique(data_new['skill_id']))
 
     # success. failure counts
     sCnt = np.zeros(shape=(num_users, num_skills),dtype=np.int)
@@ -242,21 +261,30 @@ def PreprocessAssistmentSkillBuilder(file_path, option='multiskills'):
     fCntList = []
 
     for i in range(data_new_np.shape[0]):
-        sCntList.append(list())
-        fCntList.append(list())
+        sCntList.append(0)
+        fCntList.append(0)
 
     for index in range(data_new_np.shape[0]):
         user_id = data_new_np[index][1]
         skill_ids = skill_id_values[index]
-        for skill_id in skill_ids:
-            sCntList[index].append(deepcopy(sCnt[user_id][skill_id]))
-            fCntList[index].append(deepcopy(fCnt[user_id][skill_id]))
+        if option == 'multiskills':
+            for skill_id in skill_ids:
+                sCntList[index] = (deepcopy(sCnt[user_id][skill_id]))
+                fCntList[index] = (deepcopy(fCnt[user_id][skill_id]))
+                # update counts
+                if datanp[index, 4] == 1:
+                    sCnt[user_id][skill_id]  += 1
+                else:
+                    fCnt[user_id][skill_id]  += 1
+        else:
+            skill_id = skill_ids
+            sCntList[index]= (deepcopy(sCnt[user_id][skill_id]))
+            fCntList[index]= (deepcopy(fCnt[user_id][skill_id]))
             # update counts
             if datanp[index, 4] == 1:
                 sCnt[user_id][skill_id]  += 1
             else:
                 fCnt[user_id][skill_id]  += 1
-
     # problem history record
     hist_rec = []
     hist_rec_list = []
@@ -271,16 +299,21 @@ def PreprocessAssistmentSkillBuilder(file_path, option='multiskills'):
         if(data_new_np[index, 3]==1):
             hist_rec[user_id].append((problem_id))
 
-    # new columns contain skill information for each problem
-    columnNames = list(data.head(0))
-    data_new = pd.DataFrame(data=data_new_np, columns=columnNames)
+    if 0:
+        # new columns contain skill information for each problem
+        columnNames = list(data.head(0))
+        data_new = pd.DataFrame(data=data_new_np, columns=columnNames)
+        data_new.drop(axis=1,columns='skill_id', inplace=True)
+        if option == 'multiskills':
+            data_new['skill_ids'] = skill_id_values
+        else:
+            data_new['skill_id'] = skill_id_values
 
     # add columns
-    data_new['skill_ids'] = skill_id_values
-    data_new.drop(axis=1,columns='skill_id', inplace=True)
     data_new['sCount'] = sCntList
     data_new['fCount'] = fCntList
     data_new['hist'] = hist_rec_list
+
 
     return data_new, num_skills, prob_skill_map
 
@@ -392,11 +425,8 @@ def RemoveLeastItemUser(data):
     for i in range(data.shape[0]):
         prob_cnt_per_user[data.loc[i, 'user_id']] += 1
 
-def test():
-    dataset_name =  'Assistment09-problem-history.csv'
-    file_path = '../' + dataset_name
-    data = pd.read_csv(file_path)
-    print(dataset_name, data.shape[0],  len(np.unique(data['user_id'])), len(np.unique(data['problem_id'])))
+def from_csv():
+
     dataset_name =  'Assistment09-problem.csv'
     file_path = '../' + dataset_name
     data = pd.read_csv(file_path)
@@ -413,14 +443,14 @@ def test():
     dataset_name =  'Assistment09-problem-new_skill.csv'
     file_path = '../' + dataset_name
     data = pd.read_csv(file_path)
-    print(dataset_name, data.shape[0],  len(np.unique(data['user_id'])), len(np.unique(data['problem_id'])), len(np.unique(data['skill_ids'])))
+    print(dataset_name, data.shape[0],  len(np.unique(data['user_id'])), len(np.unique(data['problem_id'])), len(np.unique(data['skill_id'])))
 
     dataset_name =  'Assistment09-problem-single_skill.csv'
     file_path = '../' + dataset_name
     data = pd.read_csv(file_path)
-    print(dataset_name, data.shape[0],  len(np.unique(data['user_id'])), len(np.unique(data['problem_id'])), len(np.unique(data['skill_ids'])))
+    print(dataset_name, data.shape[0],  len(np.unique(data['user_id'])), len(np.unique(data['problem_id'])), len(np.unique(data['skill_id'])))
 
-def main():
+def to_csv():
     dataDir = '/home/lxu/Documents/StudentLearningProcess/'
     if 0:
         # Assistment 09
@@ -474,17 +504,19 @@ def main():
 
         data, num_skills, prob_skill_map = PreprocessAssistmentSkillBuilder(dataPath)
         csv_name = 'Assistment09-' + 'problem' + '.csv'
-        data_new = data[['user_id', 'problem_id', 'correct', 'order_id', 'skill_ids']]
+        data_new = data[['user_id', 'problem_id', 'correct', 'order_id', 'skill_ids', 'sCount', 'fCount']]
         data_new.to_csv(dataDir + csv_name, index=False)
 
         data, num_skills, prob_skill_map = PreprocessAssistmentSkillBuilder(dataPath, option='newskills')
         csv_name = 'Assistment09-' + 'problem-new_skill' + '.csv'
-        data_new = data[['user_id', 'problem_id', 'correct', 'order_id', 'skill_ids']]
+        data_new = data[['user_id', 'problem_id', 'correct', 'order_id', 'skill_id', 'sCount', 'fCount']]
+        # data_new.rename(columns = {'skill_ids':'skill_id'})
         data_new.to_csv(dataDir + csv_name, index=False)
 
         data, num_skills, prob_skill_map = PreprocessAssistmentSkillBuilder(dataPath, option='nonmultiskills')
         csv_name = 'Assistment09-' + 'problem-single_skill' + '.csv'
-        data_new = data[['user_id', 'problem_id', 'correct', 'order_id', 'skill_ids']]
+        data_new = data[['user_id', 'problem_id', 'correct', 'order_id', 'skill_id', 'sCount', 'fCount']]
+        # data_new.rename(columns = {'skill_ids':'skill_id'})
         data_new.to_csv(dataDir + csv_name, index=False)
     if 0:
         # Assistment 15
@@ -493,7 +525,7 @@ def main():
         for item in items:
             data = PreprocessAssistment15(dataPath)
             csv_name = 'Assistment15-' + item + '.csv'
-            data_new = data[['user_id', item+'_id', 'correct', 'order_id']]
+            data_new = data[['user_id', item+'_id', 'correct', 'order_id', 'sCount', 'fCount']]
             data_new.to_csv(dataDir + csv_name, index=False)
 
             # pickle_name = 'Assistment15-' + item + '.pickle'
@@ -510,9 +542,10 @@ def main():
             print(data_in.dtypes)
             print(data_in.iloc[0:10,:])
 
-    # to read them and test
+
+
 
 if __name__ == '__main__':
-    # main()
-    test()
+    # to_csv()
+    # from_csv()
 

@@ -23,144 +23,148 @@ def PlotLoss(model, model_name, dataset_name):
 
 
 test_size = 20000
-
-# Assistment dataset
-dataset_name =  'skill_builder_data_corrected_withskills_section.csv'
-file_path = '/home/lxu/Documents/StudentLearningProcess/' + dataset_name
-data, num_skills, prob_skill_map = PreprocessAssistmentSkillBuilder(file_path)
-print('ASSISTment 09-10 statistics ', data.shape[0],  len(np.unique(data['user_id'])), len(np.unique(data['problem_id'])), num_skills)
-data = data.sort_values(by=['order_id'])
-# prepare data
-datanp = data.values
-testnp = datanp[-int(test_size):,:]
-trainnp = datanp[0:-int(test_size),:]
-
-# testnp = datanp[-int(0.1*datanp.shape[0]):,:]
-# trainnp = datanp[0:-int(0.1*datanp.shape[0]+1),:]
-# trainnp, testnp = train_test_split(datanp, test_size=0.2)
-#
-columnNames = list(data.head(0))
-train = pd.DataFrame(data=trainnp, columns=columnNames)
-test = pd.DataFrame(data=testnp, columns=columnNames)
-
 # store all the models
 models = []
 
- 
-name =  'global + skill'
-print(dataset_name, name)
-model= IRT()
-model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                            "batch_size": 1000, 'multi_skills': True, 'user':False })
-model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
-models.append([dataset_name, name, model])
+if 0:
+    # Assistment dataset
+    dataset_name =  'skill_builder_data_corrected_withskills_section.csv'
+    file_path = '/home/lxu/Documents/StudentLearningProcess/' + dataset_name
+    data, num_skills, prob_skill_map = PreprocessAssistmentSkillBuilder(file_path)
+    print('ASSISTment 09-10 statistics ', data.shape[0],  len(np.unique(data['user_id'])), len(np.unique(data['problem_id'])), num_skills)
+    data = data.sort_values(by=['order_id'])
+    # prepare data
+    datanp = data.values
+    testnp = datanp[-int(test_size):,:]
+    trainnp = datanp[0:-int(test_size),:]
 
- 
-name =  'global + skill + PFA'
-print(dataset_name, name)
-model= IRT()
-model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                            "batch_size": 1000, 'multi_skills': True, 'user':False,'PFA':True })
-model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
-models.append([dataset_name, name, model])
-
- 
-name =  'global + user + skill'
-print(dataset_name, name)
-model= IRT()
-model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                            "batch_size": 1000, 'multi_skills': True })
-model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
-models.append([dataset_name, name, model])
-
- 
-name =  'global + user + skill + PFA'
-print(dataset_name, name)
-model= IRT()
-model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                            "batch_size": 1000, 'multi_skills': True, 'PFA': True, 'problem': False})
-model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
-models.append([dataset_name, name, model])
-
- 
-name =  'global + user + prob + skill'
-print(dataset_name, name)
-model= IRT()
-model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                            "batch_size": 1000, 'multi_skills': True, 'PFA': False, 'problem': True})
-model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
-models.append([dataset_name, name, model])
-
-
- 
-name =  'global + user + prob + PFA'
-print(dataset_name, name)
-model= IRT()
-model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                            "batch_size": 1000, 'multi_skills': True, 'PFA': True, 'problem': True})
-model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
-models.append([dataset_name, name, model])
+    # testnp = datanp[-int(0.1*datanp.shape[0]):,:]
+    # trainnp = datanp[0:-int(0.1*datanp.shape[0]+1),:]
+    # trainnp, testnp = train_test_split(datanp, test_size=0.2)
+    #
+    columnNames = list(data.head(0))
+    train = pd.DataFrame(data=trainnp, columns=columnNames)
+    test = pd.DataFrame(data=testnp, columns=columnNames)
 
 
 
-
-name =  'globa + user + prob + MF'
-print(dataset_name, name)
-model= IRT(epsilon=4, _lambda=0.1, momentum=0.8, maxepoch=50, num_batches=300, batch_size=1000,\
-                 problem=True, multi_skills=False, user_skill=False, user_prob=False, PFA=False, MF=True,\
-                 num_feat=16, MF_skill=False, user=True, skill_dyn_embeddding=False, skill=False, global_bias=False)
-model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
-models.append([dataset_name, name, model])
-
+    name =  'global + skill'
+    print(dataset_name, name)
+    model= IRT()
+    model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                                "batch_size": 1000, 'multi_skills': True, 'user':False })
+    model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
+    models.append([dataset_name, name, model])
 
 
-# skill and problem
-ratings = data.loc[:,['user_id', 'problem_id', 'correct', 'skill_ids', 'sCount', 'fCount']].values
-order = list(data.loc[:]['hist'].values)
-
-test = ratings[-int(test_size):,:]
-train = ratings[0:-int(test_size),:]
-# print(len(order))
-order_test = order[-int(test_size):]
-order_train = order[0:-int(test_size)]
+    name =  'global + skill + PFA'
+    print(dataset_name, name)
+    model= IRT()
+    model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                                "batch_size": 1000, 'multi_skills': True, 'user':False,'PFA':True })
+    model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
+    models.append([dataset_name, name, model])
 
 
+    name =  'global + user + skill'
+    print(dataset_name, name)
+    model= IRT()
+    model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                                "batch_size": 1000, 'multi_skills': True })
+    model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
+    models.append([dataset_name, name, model])
 
-name =  'globa + user + prob + encoded prob_latent_matrix + dynamic'
-print(dataset_name, name)
-model= BPMFSkillEncoded()
-model.set_params({"num_feat": num_skills, "epsilon": 5, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                "batch_size": 1000, 'dynamic':True})
 
-model.fit(train, test, order_train, order_test, len(np.unique(ratings[:, 0])), len(np.unique(ratings[:, 1])), prob_skill_map)
-models.append([dataset_name, name, model])
+    name =  'global + user + skill + PFA'
+    print(dataset_name, name)
+    model= IRT()
+    model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                                "batch_size": 1000, 'multi_skills': True, 'PFA': True, 'problem': False})
+    model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
+    models.append([dataset_name, name, model])
 
- 
-name =  'globa + user + prob + encoded prob_latent_matrix'
-print(dataset_name, name)
-model= BPMFSkillEncoded()
-model.set_params({"num_feat": num_skills, "epsilon": 5, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                "batch_size": 1000, 'dynamic':False})
-model.fit(train, test, order_train, order_test, len(np.unique(ratings[:, 0])), len(np.unique(ratings[:, 1])), prob_skill_map)
-models.append([dataset_name, name, model])
 
- 
-name =  'globa + user + prob + encoded prob_latent_matrix + dynamic'
-print(dataset_name, name)
-model= BPMFSkillEncoded()
-model.set_params({"num_feat": num_skills, "epsilon": 5, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
-                "batch_size": 1000, 'dynamic':True})
+    name =  'global + user + prob + skill'
+    print(dataset_name, name)
+    model= IRT()
+    model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                                "batch_size": 1000, 'multi_skills': True, 'PFA': False, 'problem': True})
+    model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
+    models.append([dataset_name, name, model])
 
-model.fit(train, test, order_train, order_test, len(np.unique(ratings[:, 0])), len(np.unique(ratings[:, 1])), prob_skill_map)
-models.append([dataset_name, name, model])
+
+
+    name =  'global + user + prob + PFA'
+    print(dataset_name, name)
+    model= IRT()
+    model.set_params({ "epsilon": 1, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                                "batch_size": 1000, 'multi_skills': True, 'PFA': True, 'problem': True})
+    model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
+    models.append([dataset_name, name, model])
+
+
+
+
+    name =  'globa + user + prob + MF'
+    print(dataset_name, name)
+    model= IRT(epsilon=4, _lambda=0.1, momentum=0.8, maxepoch=50, num_batches=300, batch_size=1000,\
+                     problem=True, multi_skills=False, user_skill=False, user_prob=False, PFA=False, MF=True,\
+                     num_feat=16, MF_skill=False, user=True, skill_dyn_embeddding=False, skill=False, global_bias=False)
+    model.fit(train, test, len(np.unique(data['user_id'])), num_skills, len(np.unique(data['problem_id'])))
+    models.append([dataset_name, name, model])
+
+
+
+    # skill and problem
+    ratings = data.loc[:,['user_id', 'problem_id', 'correct', 'skill_ids', 'sCount', 'fCount']].values
+    order = list(data.loc[:]['hist'].values)
+
+    test = ratings[-int(test_size):,:]
+    train = ratings[0:-int(test_size),:]
+    # print(len(order))
+    order_test = order[-int(test_size):]
+    order_train = order[0:-int(test_size)]
+
+
+
+    name =  'globa + user + prob + encoded prob_latent_matrix + dynamic'
+    print(dataset_name, name)
+    model= BPMFSkillEncoded()
+    model.set_params({"num_feat": num_skills, "epsilon": 5, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                    "batch_size": 1000, 'dynamic':True})
+
+    model.fit(train, test, order_train, order_test, len(np.unique(ratings[:, 0])), len(np.unique(ratings[:, 1])), prob_skill_map)
+    models.append([dataset_name, name, model])
+
+
+    name =  'globa + user + prob + encoded prob_latent_matrix'
+    print(dataset_name, name)
+    model= BPMFSkillEncoded()
+    model.set_params({"num_feat": num_skills, "epsilon": 5, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                    "batch_size": 1000, 'dynamic':False})
+    model.fit(train, test, order_train, order_test, len(np.unique(ratings[:, 0])), len(np.unique(ratings[:, 1])), prob_skill_map)
+    models.append([dataset_name, name, model])
+
+
+    name =  'globa + user + prob + encoded prob_latent_matrix + dynamic'
+    print(dataset_name, name)
+    model= BPMFSkillEncoded()
+    model.set_params({"num_feat": num_skills, "epsilon": 5, "_lambda": 0.2, "momentum": 0.5, "maxepoch": 40, "num_batches": 300,
+                    "batch_size": 1000, 'dynamic':True})
+
+    model.fit(train, test, order_train, order_test, len(np.unique(ratings[:, 0])), len(np.unique(ratings[:, 1])), prob_skill_map)
+    models.append([dataset_name, name, model])
 
 
 
 # Assistment-15
 
-dataset_name =  'Assistment15-skill.csv'
-file_path = '../' + dataset_name
-data = pd.read_csv(file_path)
+# dataset_name =  'Assistment15-skill.csv'
+# file_path = '../' + dataset_name
+# data = pd.read_csv(file_path)
+dataset_name =  'Assistment15-skill.pickle'
+file_path = '../StudentLearningProcess/' + dataset_name
+data = pd.read_pickle(file_path)
 print('ASSISTment 14-15 statistics ', data.shape[0],  len(np.unique(data['user_id'])), len(np.unique(data['skill_id'])))
 # prepare data
 datanp = data.iloc[:,0:-1].values
